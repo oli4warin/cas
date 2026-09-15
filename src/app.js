@@ -19,7 +19,7 @@ import { PlotPanel } from './components/plotPanel.js';
 import { TablePanel } from './components/tablePanel.js';
 import { Credits } from './components/credits.js';
 import { SettingsMenu } from './components/settingsMenu.js';
-import { FunctionsMenu } from './components/functionsMenu.js';
+import { FunctionsMenu, knownFunctionNames } from './components/functionsMenu.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -76,6 +76,11 @@ const TOOLBAR = [
 ];
 
 const EXAMPLES = ['integrate(sin(x)*x,x)', 'solve(x^2-5*x+6=0,x)', 'factor(x^3-1)', 'limit(sin(x)/x,x,0)'];
+
+// Names offered by input tab completion: every function from the functions menu, plus a
+// few bare constants (no parens to complete into) that don't otherwise appear there.
+const COMPLETION_CONSTANTS = ['pi', 'infinity'];
+const STATIC_COMPLETION_NAMES = [...knownFunctionNames(), ...COMPLETION_CONSTANTS];
 
 export function mountApp(root) {
   const state = {
@@ -174,6 +179,7 @@ export function mountApp(root) {
     { class: 'hint-bar' },
     h('span', null, '↑ / ↓ select an output or input'),
     h('span', null, 'Enter/Tab insert selection at cursor'),
+    h('span', null, 'Tab complete a function name'),
     h('span', null, 'Enter evaluate (no selection)'),
     h('span', null, 'Ctrl+Enter evaluate numerically'),
     h('span', null, 'Enter on empty input repeats the last one'),
@@ -433,6 +439,45 @@ export function mountApp(root) {
     insertAtCursor({ before: text, after: '' });
   }
 
+  // ---------- tab completion ----------
+
+  // The identifier being typed right up to the cursor, e.g. "sq" in "2+sq|rt(9)" (| = caret) -
+  // empty when the caret isn't right after a name (nothing typed, or it follows an operator).
+  function wordBeforeCursor() {
+    if (input.selectionStart !== input.selectionEnd) return '';
+    const upToCaret = input.value.slice(0, input.selectionStart ?? input.value.length);
+    return upToCaret.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
+  }
+
+  function longestCommonPrefix(words) {
+    return words.reduce((prefix, word) => {
+      let i = 0;
+      while (i < prefix.length && i < word.length && prefix[i] === word[i]) i++;
+      return prefix.slice(0, i);
+    });
+  }
+
+  // Completes the identifier before the caret against known function/constant names and the
+  // user's own defined variables/functions - a single match completes fully, several matches
+  // complete as far as they agree (classic shell-style completion), and no match leaves the
+  // input untouched so Tab falls back to its history-insert behavior below.
+  function tryCompleteWord() {
+    const word = wordBeforeCursor();
+    if (!word) return false;
+    const names = new Set([...STATIC_COMPLETION_NAMES, ...state.definitions.keys()]);
+    const matches = [...names].filter((name) => name.length >= word.length && name.toLowerCase().startsWith(word.toLowerCase())).sort();
+    if (matches.length === 0) return false;
+    const completion = matches.length === 1 ? matches[0] : longestCommonPrefix(matches);
+    if (completion.length <= word.length) return false;
+    const pos = input.selectionStart;
+    input.value = input.value.slice(0, pos - word.length) + completion + input.value.slice(pos);
+    const newPos = pos - word.length + completion.length;
+    input.focus();
+    input.setSelectionRange(newPos, newPos);
+    onInputChanged();
+    return true;
+  }
+
   // ---------- evaluation ----------
 
   async function submit({ force = false, approx = false } = {}) {
@@ -541,6 +586,13 @@ export function mountApp(root) {
     }
 
     if (e.key === 'Tab') {
+      // A step explicitly selected via Up/Down wins outright. Otherwise, try completing
+      // the identifier under the caret first - only when that's a no-op (nothing typed, or
+      // no name matches) does Tab fall back to inserting the last output, same as before.
+      if (!step && tryCompleteWord()) {
+        e.preventDefault();
+        return;
+      }
       const s = step ?? (state.history.length ? { idx: state.history.length - 1, part: 'output' } : null);
       if (!s) return;
       e.preventDefault();
