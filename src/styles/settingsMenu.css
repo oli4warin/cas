@@ -1,0 +1,141 @@
+.settings-menu {
+  position: relative;
+}
+
+.settings-menu__trigger {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.settings-menu__trigger:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.settings-menu__trigger--active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.settings-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 190px;
+  padding: 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transform-origin: top right;
+  animation: popIn 0.15s ease;
+}
+
+.settings-menu__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-menu__label {
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.settings-menu__segmented {
+  display: flex;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.settings-menu__segmented button {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--mono);
+  border: none;
+  background: var(--code-bg);
+  color: var(--text);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.settings-menu__segmented button:not(:first-child) {
+  border-left: 1px solid var(--border);
+}
+
+.settings-menu__segmented button:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.settings-menu__segmented button:disabled {
+  cursor: not-allowed;
+}
+
+.settings-menu__segmented button.settings-menu__seg--active {
+  background: var(--accent);
+  color: var(--bg);
+  opacity: 1;
+}
+
+.settings-menu__row--checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.theme-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 2px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.theme-switch:hover {
+  border-color: var(--accent-border);
+}
+
+.theme-switch__thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-h);
+  transform: translateX(0);
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.theme-switch--light .theme-switch__thumb {
+  transform: translateX(16px);
+  background: var(--accent);
+  border-color: var(--accent-border);
+  color: #fff;
+}

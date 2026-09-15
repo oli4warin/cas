@@ -1,0 +1,105 @@
+.functions-menu {
+  position: relative;
+}
+
+.functions-menu__trigger {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.functions-menu__trigger:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.functions-menu__trigger--active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.functions-menu__trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.functions-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 260px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transform-origin: top right;
+  animation: popIn 0.15s ease;
+}
+
+.functions-menu__section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.functions-menu__heading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  opacity: 0.85;
+  padding: 4px 6px 2px;
+}
+
+.functions-menu__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-h);
+  text-align: left;
+  cursor: pointer;
+}
+
+.functions-menu__item:hover {
+  background: var(--code-bg);
+  color: var(--accent);
+  transform: translateX(2px);
+}
+
+.functions-menu__itemLabel {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.functions-menu__itemHint {
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.7;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

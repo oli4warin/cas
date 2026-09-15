@@ -1,0 +1,768 @@
+import { h, clear } from './lib/dom.js';
+import {
+  ensureGiacLoaded,
+  evaluate as giacEvaluate,
+  evaluateApprox as giacEvaluateApprox,
+  cancelCurrentEval,
+  looksIncomplete,
+  reinsertableValue,
+  evaluateRaw as giacEvaluateRaw,
+} from './lib/giac.js';
+import { giacToLatex } from './lib/giacToLatex.js';
+import { typesetNode } from './lib/mathjax.js';
+import { applyEntryToDefinitions } from './lib/definitions.js';
+import { startBridgeHost } from './lib/plotBridge.js';
+import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
+import { makeInitialColumns } from './lib/tableColumns.js';
+import { HistoryEntry } from './components/historyEntry.js';
+import { PlotPanel } from './components/plotPanel.js';
+import { TablePanel } from './components/tablePanel.js';
+import { Credits } from './components/credits.js';
+import { SettingsMenu } from './components/settingsMenu.js';
+import { FunctionsMenu } from './components/functionsMenu.js';
+
+function makeSessionId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+}
+
+function getInitialTheme() {
+  try {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // localStorage can throw in locked-down environments (private mode, disabled storage) -
+    // fall through to the default below.
+  }
+  return 'dark';
+}
+
+// Off by default - the raw text is a fallback for spotting a rendering bug, not something
+// most sessions need cluttering every entry.
+function getInitialShowText() {
+  try {
+    return localStorage.getItem('showText') === '1';
+  } catch {
+    return false;
+  }
+}
+
+// Flattens history into a single up/down browsing order: most recent output first, then
+// that same entry's input, then the previous entry's output, and so on. An entry that
+// errored has no reinsertable output, so only its input step is included.
+function buildHistorySteps(history) {
+  const steps = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (!history[i].isError) steps.push({ idx: i, part: 'output' });
+    steps.push({ idx: i, part: 'input' });
+  }
+  return steps;
+}
+
+const TOOLBAR = [
+  { label: '√', prefix: 'sqrt(', suffix: ')' },
+  { label: 'x²', prefix: '^2', suffix: '' },
+  { label: 'xʸ', prefix: '^', suffix: '' },
+  { label: 'π', prefix: 'pi', suffix: '' },
+  { label: '∫', prefix: 'integrate(', suffix: ',x)' },
+  { label: 'd/dx', prefix: 'diff(', suffix: ',x)' },
+  { label: 'lim', prefix: 'limit(', suffix: ',x,0)' },
+  { label: 'Σ', prefix: 'sum(', suffix: ',x,1,10)' },
+  { label: 'solve', prefix: 'solve(', suffix: '=0,x)' },
+  { label: 'factor', prefix: 'factor(', suffix: ')' },
+  { label: 'expand', prefix: 'expand(', suffix: ')' },
+  { label: 'simplify', prefix: 'simplify(', suffix: ')' },
+  { label: 'abs', prefix: 'abs(', suffix: ')' },
+  { label: '( )', prefix: '(', suffix: ')' },
+];
+
+const EXAMPLES = ['integrate(sin(x)*x,x)', 'solve(x^2-5*x+6=0,x)', 'factor(x^3-1)', 'limit(sin(x)/x,x,0)'];
+
+export function mountApp(root) {
+  const state = {
+    status: 'loading', // 'loading' | 'ready' | 'error'
+    error: null,
+    history: [],
+    navPos: -1, // -1 = live / not browsing, else an index into `steps`
+    warning: null,
+    busy: false,
+    definitions: new Map(),
+    plotOpen: false,
+    tableOpen: false,
+    mobileView: 'calculator',
+    plotRows: [makeRow()],
+    plotView: DEFAULT_VIEW,
+    tableColumns: makeInitialColumns(),
+    angleMode: 'RAD',
+    approxMode: false,
+    theme: getInitialTheme(),
+    showText: getInitialShowText(),
+  };
+
+  const sessionId = makeSessionId();
+  // Snapshot of the rows/view being handed off to a popped-out window, taken at the
+  // instant popOutPlot() fires - see the comment there for why this can't just read the
+  // live plotRows/plotView (those get reset to blank in that same click handler, and the
+  // popup's state request only arrives after that reset has already landed).
+  let plotHandoff = null;
+  let bridgeHost = null;
+  let plotPanelInstance = null;
+  let tablePanelInstance = null;
+
+  const entryViews = []; // parallel to state.history
+
+  // ---------- static structure ----------
+
+  const title = h('h1', null, 'Calculator');
+  const printBtn = h('button', { type: 'button', class: 'header__plotBtn', onclick: () => window.print() }, 'Print');
+  const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, 'Plot');
+  const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, 'Table');
+  const functionsMenu = FunctionsMenu({ onInsert: insertSnippet });
+  const settingsMenu = SettingsMenu({
+    onAngleModeChange: handleAngleModeChange,
+    onApproxChange: handleApproxModeChange,
+    onThemeChange: handleThemeChange,
+    onShowTextChange: handleShowTextChange,
+  });
+  const statusPill = h('span', { class: 'status-pill' });
+
+  const header = h(
+    'header',
+    { class: 'header' },
+    title,
+    h('div', { class: 'header__actions' }, printBtn, plotBtn, tableBtn, functionsMenu.root, settingsMenu.root, statusPill),
+  );
+
+  const historyList = h('main', { class: 'history' });
+  const emptyHint = h('div', { class: 'empty-hint' });
+  const loadingHint = h(
+    'div',
+    { class: 'empty-hint' },
+    h('div', { class: 'loading-bar' }, h('div', { class: 'loading-bar__fill' })),
+    h('p', null, 'Downloading and starting the Xcas computer algebra engine…'),
+    h('p', { class: 'empty-hint__small' }, "First load pulls ~18MB of WebAssembly; it's cached by the browser afterwards."),
+  );
+  const errorHint = h('div', { class: 'empty-hint empty-hint--error' });
+
+  const previewSpan = h('span');
+  const previewWrap = h('div', { class: 'formula-preview formula-preview--empty' }, previewSpan);
+  let previewDebounce = null;
+
+  const input = h('input', {
+    class: 'input-row__field',
+    type: 'text',
+    placeholder: 'Waiting for engine…',
+    autocomplete: 'off',
+    autocorrect: 'off',
+    spellcheck: false,
+  });
+  const submitBtn = h('button', { type: 'button', class: 'input-row__submit', onclick: () => submit({}) }, '=');
+  const stopBtn = h('button', { type: 'button', class: 'input-row__submit input-row__submit--stop', onclick: () => cancelCurrentEval() }, 'Stop');
+  stopBtn.style.display = 'none';
+  const inputRow = h('div', { class: 'input-row' }, input, submitBtn, stopBtn);
+
+  const toolbar = h(
+    'div',
+    { class: 'toolbar' },
+    TOOLBAR.map((t) => h('button', { type: 'button', class: 'toolbar__btn', onclick: () => insertSnippet(t.prefix, t.suffix) }, t.label)),
+  );
+
+  const warningBar = h('div', { class: 'warning-bar' });
+  warningBar.style.display = 'none';
+
+  const hintBar = h(
+    'footer',
+    { class: 'hint-bar' },
+    h('span', null, '↑ / ↓ select an output or input'),
+    h('span', null, 'Enter/Tab insert selection at cursor'),
+    h('span', null, 'Enter evaluate (no selection)'),
+    h('span', null, 'Ctrl+Enter evaluate numerically'),
+    h('span', null, 'Enter on empty input repeats the last one'),
+    h('span', null, 'Esc clear selection (or return to input from plot/table)'),
+    h('span', null, 'Backspace on a selected entry deletes it'),
+    h('span', null, 'Alt+P plot · Alt+T table'),
+  );
+
+  const appColumn = h(
+    'div',
+    { class: 'app' },
+    header,
+    historyList,
+    previewWrap,
+    inputRow,
+    toolbar,
+    warningBar,
+    hintBar,
+    Credits(),
+  );
+
+  const calcColumn = h('div', { class: 'layout__calc' }, appColumn);
+
+  const tabCalc = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('calculator') }, 'Calculator');
+  const tabPlot = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot') }, 'Plot');
+  const tabTable = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('table') }, 'Table');
+  const tabsBar = h('div', { class: 'layout__tabs' }, tabCalc, tabPlot, tabTable);
+  tabsBar.style.display = 'none';
+
+  const plotItem = h('div', { class: 'layout__plotItem' });
+  const tableItem = h('div', { class: 'layout__tableItem' });
+  const sideColumn = h('div', { class: 'layout__side' }, plotItem, tableItem);
+  sideColumn.style.display = 'none';
+
+  const layout = h('div', { class: 'layout' }, tabsBar, calcColumn, sideColumn);
+
+  clear(root);
+  root.appendChild(layout);
+
+  // ---------- rendering helpers ----------
+
+  function renderLayout() {
+    const split = state.plotOpen || state.tableOpen;
+    layout.className = `layout${split ? ' layout--split' : ''}`;
+    layout.dataset.mobileView = state.mobileView;
+    tabsBar.style.display = split ? '' : 'none';
+    tabPlot.style.display = state.plotOpen ? '' : 'none';
+    tabTable.style.display = state.tableOpen ? '' : 'none';
+    tabCalc.classList.toggle('layout__tab--active', state.mobileView === 'calculator');
+    tabPlot.classList.toggle('layout__tab--active', state.mobileView === 'plot');
+    tabTable.classList.toggle('layout__tab--active', state.mobileView === 'table');
+    sideColumn.style.display = split ? '' : 'none';
+    plotItem.style.display = state.plotOpen ? '' : 'none';
+    tableItem.style.display = state.tableOpen ? '' : 'none';
+
+    plotBtn.classList.toggle('header__plotBtn--active', state.plotOpen);
+    tableBtn.classList.toggle('header__plotBtn--active', state.tableOpen);
+    printBtn.disabled = state.history.length === 0;
+  }
+
+  function renderStatus() {
+    const engineReady = state.status === 'ready';
+    statusPill.className = `status-pill status-pill--${state.busy ? 'busy' : state.status}`;
+    statusPill.textContent =
+      state.status === 'loading' ? 'Loading engine…' : state.status === 'ready' ? (state.busy ? 'Evaluating…' : 'Ready') : state.status === 'error' ? 'Failed to load' : '';
+
+    input.disabled = !engineReady;
+    input.placeholder = state.status === 'ready' ? 'Enter an expression…' : 'Waiting for engine…';
+    submitBtn.disabled = !engineReady;
+    submitBtn.style.display = state.busy ? 'none' : '';
+    stopBtn.style.display = state.busy ? '' : 'none';
+
+    functionsMenu.setDisabled(!engineReady);
+    settingsMenu.update({ angleMode: state.angleMode, approx: state.approxMode, showText: state.showText, theme: state.theme, disabled: !engineReady || state.busy });
+
+    for (const btn of toolbar.children) btn.disabled = !engineReady;
+  }
+
+  function renderHistoryEmptyState() {
+    const showEmpty = state.history.length === 0 && state.status === 'ready';
+    const showLoading = state.status === 'loading';
+    const showError = state.status === 'error';
+
+    if (showEmpty && emptyHint.parentElement == null) historyList.insertBefore(emptyHint, historyList.firstChild);
+    if (!showEmpty && emptyHint.parentElement) emptyHint.remove();
+    if (showLoading && loadingHint.parentElement == null) historyList.insertBefore(loadingHint, historyList.firstChild);
+    if (!showLoading && loadingHint.parentElement) loadingHint.remove();
+    if (showError && errorHint.parentElement == null) historyList.insertBefore(errorHint, historyList.firstChild);
+    if (!showError && errorHint.parentElement) errorHint.remove();
+    if (showError) errorHint.textContent = state.error || '';
+  }
+
+  function renderWarning() {
+    if (state.warning) {
+      warningBar.textContent = state.warning;
+      warningBar.style.display = '';
+    } else {
+      warningBar.style.display = 'none';
+    }
+  }
+
+  if (emptyHint.children.length === 0) {
+    emptyHint.append(
+      h('p', null, 'Type an expression and press Enter. Examples:'),
+      h(
+        'ul',
+        null,
+        EXAMPLES.map((expr) => h('li', { onclick: () => selectExample(expr) }, expr)),
+      ),
+    );
+  }
+
+  // ---------- history ----------
+
+  function steps() {
+    return buildHistorySteps(state.history);
+  }
+  function currentStep() {
+    const s = steps();
+    return state.navPos >= 0 ? s[state.navPos] : null;
+  }
+
+  function updateSelection() {
+    const step = currentStep();
+    entryViews.forEach((view, idx) => {
+      view.setSelected(step && step.idx === idx ? step.part : null);
+    });
+    if (step) {
+      document.getElementById(`entry-${step.idx}`)?.scrollIntoView({ block: 'nearest' });
+    }
+    input.scrollIntoView({ block: 'nearest' });
+  }
+
+  function scrollHistoryToBottom() {
+    historyList.scrollTop = historyList.scrollHeight;
+    // MathJax typesets the newest entry's math asynchronously (see lib/mathjax), so its
+    // final height isn't known yet on this first scroll - re-pin to bottom once that
+    // layout settles a moment later.
+    const observer = new MutationObserver(() => {
+      historyList.scrollTop = historyList.scrollHeight;
+      observer.disconnect();
+    });
+    observer.observe(historyList, { childList: true, subtree: true, characterData: true });
+    setTimeout(() => observer.disconnect(), 1000);
+  }
+
+  function pushHistoryEntry(entry) {
+    state.history.push(entry);
+    const idx = state.history.length - 1;
+    const view = HistoryEntry({ entry, index: idx, onSelect: selectHistory, onDelete: deleteEntry });
+    view.setShowText(state.showText);
+    const wrapper = h('div', { id: `entry-${idx}` }, view.root);
+    historyList.appendChild(wrapper);
+    entryViews.push(view);
+    renderHistoryEmptyState();
+    renderLayout();
+    scrollHistoryToBottom();
+  }
+
+  // Removes one In/Out pair from the visible history - via the hover × button, or Backspace
+  // while that entry's input or output is selected. This only drops the entry from the
+  // notebook view; it doesn't (and can't cleanly) unwind any variable the engine assigned
+  // while evaluating it, same as deleting a cell in a notebook doesn't rewind the kernel.
+  function deleteEntry(idx) {
+    state.history.splice(idx, 1);
+    // Entries after the deleted one shift down one slot - their In[]/Out[] numbers and
+    // captured index change, so tear down the deleted entry's wrapper *and* every
+    // wrapper after it (whose ids/labels are about to change) before rebuilding.
+    for (let i = idx; i < entryViews.length; i++) {
+      document.getElementById(`entry-${i}`)?.remove();
+    }
+    entryViews.length = idx;
+    for (let i = idx; i < state.history.length; i++) {
+      const view = HistoryEntry({ entry: state.history[i], index: i, onSelect: selectHistory, onDelete: deleteEntry });
+      view.setShowText(state.showText);
+      const wrapper = h('div', { id: `entry-${i}` }, view.root);
+      historyList.appendChild(wrapper);
+      entryViews.push(view);
+    }
+    state.navPos = -1;
+    renderHistoryEmptyState();
+    renderLayout();
+    updateSelection();
+  }
+
+  // Clicking In[]/Out[] copies that part to the clipboard (see historyEntry.js) - this just
+  // mirrors the click into the same selection state Up/Down browsing uses, so the copied
+  // part is highlighted.
+  function selectHistory(idx, part) {
+    const pos = steps().findIndex((s) => s.idx === idx && s.part === part);
+    state.navPos = pos;
+    updateSelection();
+  }
+
+  // ---------- input helpers ----------
+
+  function insertAtCursor(text, { wrapSelection = false } = {}) {
+    const value = input.value;
+    const start = input.selectionStart ?? value.length;
+    const end = input.selectionEnd ?? value.length;
+    const selected = wrapSelection ? value.slice(start, end) : '';
+    const next = value.slice(0, start) + text.before + selected + text.after + value.slice(end);
+    input.value = next;
+    const pos = start + text.before.length + selected.length;
+    input.focus();
+    input.setSelectionRange(pos, pos);
+    onInputChanged();
+  }
+
+  function insertSnippet(prefix, suffix) {
+    insertAtCursor({ before: prefix, after: suffix }, { wrapSelection: true });
+  }
+
+  // Used by the example expressions shown on the empty history screen.
+  function selectExample(expr) {
+    input.value = expr;
+    input.focus();
+    input.setSelectionRange(expr.length, expr.length);
+    onInputChanged();
+  }
+
+  function updatePreview() {
+    const latex = giacToLatex(input.value) || '';
+    clearTimeout(previewDebounce);
+    previewDebounce = setTimeout(() => {
+      if (latex) {
+        previewWrap.className = 'formula-preview';
+        previewSpan.textContent = '\\[' + latex + '\\]';
+        typesetNode(previewSpan);
+      } else {
+        previewWrap.className = 'formula-preview formula-preview--empty';
+        previewSpan.textContent = 'Formula preview';
+      }
+    }, 60);
+  }
+
+  function onInputChanged() {
+    updatePreview();
+    if (state.navPos >= 0) {
+      state.navPos = -1;
+      updateSelection();
+    }
+    if (state.warning) {
+      state.warning = null;
+      renderWarning();
+    }
+  }
+
+  input.addEventListener('input', onInputChanged);
+
+  // Inserts the given history step's value at the cursor, merging into whatever is
+  // already typed rather than replacing it (e.g. typing "2*", selecting an entry, then
+  // confirming leaves "2*entry" - it never overwrites the "2*" that was already there).
+  function insertStepAtCursor(step) {
+    const entry = state.history[step.idx];
+    const text = step.part === 'input' ? entry.input : reinsertableValue(entry.raw);
+    insertAtCursor({ before: text, after: '' });
+  }
+
+  // ---------- evaluation ----------
+
+  async function submit({ force = false, approx = false } = {}) {
+    const engineReady = state.status === 'ready';
+    // An empty input on Enter/Ctrl+Enter repeats the last expression (in that key's mode -
+    // exact or approx) rather than doing nothing, so re-running the previous computation
+    // doesn't require retyping or reaching for history browsing.
+    const expr = input.value.trim() || state.history[state.history.length - 1]?.input || '';
+    if (!expr || !engineReady || state.busy) return;
+    if (!force && looksIncomplete(expr)) {
+      state.warning = 'This expression looks unfinished (dangling operator or unmatched parenthesis) - evaluating it can take a very long time. Press Enter to run it anyway.';
+      renderWarning();
+      return;
+    }
+    state.warning = null;
+    renderWarning();
+    state.busy = true;
+    renderStatus();
+    const result = approx ? await giacEvaluateApprox(expr) : await giacEvaluate(expr);
+    state.busy = false;
+    renderStatus();
+    pushHistoryEntry({ input: expr, ...result });
+    setDefinitions(applyEntryToDefinitions(state.definitions, expr, result));
+    input.value = '';
+    state.navPos = -1;
+    updatePreview();
+    updateSelection();
+  }
+
+  function setDefinitions(next) {
+    if (next === state.definitions) return;
+    state.definitions = next;
+    plotPanelInstance?.setDefinitions(state.definitions);
+    bridgeHost?.notifyDefinitionsChanged();
+  }
+
+  // ---------- key handling ----------
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const step = currentStep();
+      // With a step selected (via Up/Down below), Enter inserts it instead of submitting -
+      // browsing never touched the input, so this is the only way its selection actually
+      // reaches the input.
+      if (step) {
+        insertStepAtCursor(step);
+        state.navPos = -1;
+        updateSelection();
+        return;
+      }
+      // Enter always runs the expression as-is; Shift+Enter is the one that checks it
+      // first (see submit's `force` param) - the reverse of the key's usual meaning, but
+      // it keeps the everyday key (Enter) free of the completeness check. Ctrl+Enter (or
+      // Cmd+Enter) evaluates numerically instead of exactly.
+      submit({ force: !e.shiftKey, approx: e.ctrlKey || e.metaKey });
+      return;
+    }
+
+    // Up/Down only move which output/input is selected - they never touch the input's
+    // text. Confirm with Enter or Tab to actually insert it.
+    if (e.key === 'ArrowUp') {
+      const s = steps();
+      if (s.length === 0) return;
+      e.preventDefault();
+      state.navPos = state.navPos < 0 ? 0 : Math.min(s.length - 1, state.navPos + 1);
+      updateSelection();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      if (state.navPos < 0) return;
+      e.preventDefault();
+      state.navPos = state.navPos <= 0 ? -1 : state.navPos - 1;
+      updateSelection();
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      state.warning = null;
+      renderWarning();
+      state.navPos = -1;
+      updateSelection();
+      return;
+    }
+
+    // Left/Right scroll the selected input/output sideways instead of moving the
+    // (otherwise empty, while browsing) input's text cursor.
+    const step = currentStep();
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && step) {
+      const wrapper = document.getElementById(`entry-${step.idx}`);
+      const row = wrapper?.querySelector(step.part === 'input' ? '.entry__input' : '.entry__output');
+      if (row) {
+        e.preventDefault();
+        row.scrollBy({ left: e.key === 'ArrowLeft' ? -60 : 60 });
+      }
+      return;
+    }
+
+    // Backspace with a step selected deletes that whole entry instead of editing the
+    // input field.
+    if (e.key === 'Backspace' && step) {
+      e.preventDefault();
+      deleteEntry(step.idx);
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const s = step ?? (state.history.length ? { idx: state.history.length - 1, part: 'output' } : null);
+      if (!s) return;
+      e.preventDefault();
+      insertStepAtCursor(s);
+      state.navPos = -1;
+      updateSelection();
+    }
+  }
+  input.addEventListener('keydown', handleKeyDown);
+
+  // Alt+P/Alt+T toggle the plot and table panels from anywhere, including while the
+  // expression input is focused. Esc also jumps back to the expression input from a
+  // plot/table field - the input's own keydown handler already owns Esc for itself, so
+  // this only fires when focus is actually inside one of the side panels.
+  window.addEventListener('keydown', (e) => {
+    if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      const key = e.key.toLowerCase();
+      if (key === 'p') {
+        e.preventDefault();
+        (state.plotOpen ? closePlot : openPlot)();
+        return;
+      }
+      if (key === 't') {
+        e.preventDefault();
+        (state.tableOpen ? closeTable : openTable)();
+        return;
+      }
+    }
+    if (e.key === 'Escape' && document.activeElement?.closest('.plot-panel, .table-panel')) {
+      e.preventDefault();
+      input.focus();
+    }
+  });
+
+  // ---------- settings ----------
+
+  function handleAngleModeChange(mode) {
+    state.angleMode = mode;
+    giacEvaluateRaw(mode === 'DEG' ? 'angle_radian(0)' : 'angle_radian(1)');
+    renderStatus();
+  }
+
+  function handleApproxModeChange(on) {
+    state.approxMode = on;
+    giacEvaluateRaw(on ? 'approx_mode(1)' : 'approx_mode(0)');
+    renderStatus();
+  }
+
+  function handleThemeChange(next) {
+    state.theme = next;
+    document.documentElement.dataset.theme = state.theme;
+    try {
+      localStorage.setItem('theme', state.theme);
+    } catch {
+      // Ignore - theme just won't persist across reloads in this environment.
+    }
+    renderStatus();
+  }
+
+  function handleShowTextChange(next) {
+    state.showText = next;
+    try {
+      localStorage.setItem('showText', next ? '1' : '0');
+    } catch {
+      // Ignore - the preference just won't persist across reloads in this environment.
+    }
+    for (const view of entryViews) view.setShowText(state.showText);
+    renderStatus();
+  }
+
+  document.documentElement.dataset.theme = state.theme;
+
+  // ---------- plot / table panels ----------
+
+  function setMobileView(view) {
+    state.mobileView = view;
+    renderLayout();
+  }
+
+  function openPlot() {
+    state.plotOpen = true;
+    state.mobileView = 'plot';
+    mountPlotPanel();
+    renderLayout();
+  }
+
+  function closePlot() {
+    state.plotOpen = false;
+    if (state.mobileView === 'plot') state.mobileView = state.tableOpen ? 'table' : 'calculator';
+    unmountPlotPanel();
+    renderLayout();
+    input.focus();
+  }
+
+  function openTable() {
+    state.tableOpen = true;
+    state.mobileView = 'table';
+    mountTablePanel();
+    renderLayout();
+  }
+
+  function closeTable() {
+    state.tableOpen = false;
+    if (state.mobileView === 'table') state.mobileView = state.plotOpen ? 'plot' : 'calculator';
+    unmountTablePanel();
+    renderLayout();
+    input.focus();
+  }
+
+  function mountPlotPanel() {
+    plotPanelInstance = PlotPanel({
+      evaluateRaw: giacEvaluateRaw,
+      rows: state.plotRows,
+      view: state.plotView,
+      onRowsChange: (rows) => {
+        state.plotRows = rows;
+      },
+      onViewChange: (next) => {
+        state.plotView = typeof next === 'function' ? next(state.plotView) : next;
+        plotPanelInstance?.setView(state.plotView);
+      },
+      onPopOut: popOutPlot,
+      onClose: closePlot,
+    });
+    plotPanelInstance.setDefinitions(state.definitions);
+    clear(plotItem);
+    plotItem.appendChild(plotPanelInstance.root);
+  }
+
+  function unmountPlotPanel() {
+    plotPanelInstance?.destroy();
+    plotPanelInstance = null;
+    clear(plotItem);
+  }
+
+  function mountTablePanel() {
+    tablePanelInstance = TablePanel({
+      columns: state.tableColumns,
+      onColumnsChange: (cols) => {
+        state.tableColumns = cols;
+      },
+      onAssign: assignTableColumn,
+      onPurge: purgeTableColumn,
+      onClose: closeTable,
+    });
+    clear(tableItem);
+    tableItem.appendChild(tablePanelInstance.root);
+  }
+
+  function unmountTablePanel() {
+    tablePanelInstance?.destroy();
+    tablePanelInstance = null;
+    clear(tableItem);
+  }
+
+  // Pushes one table column's cells into the CAS session as a list variable - same
+  // evaluate-and-fold-into-definitions path submit() uses for the main input line, so a
+  // table column shows up everywhere a calculator-typed variable would.
+  async function assignTableColumn(expr) {
+    if (state.status !== 'ready') return { ok: false, message: 'Engine not ready.' };
+    const out = await giacEvaluateRaw(expr);
+    if (out.startsWith('GIAC_ERROR')) {
+      return { ok: false, message: out.slice(11).trim() || 'Could not evaluate this column.' };
+    }
+    setDefinitions(applyEntryToDefinitions(state.definitions, expr, { isError: false }));
+    return { ok: true, message: null };
+  }
+
+  function purgeTableColumn(name) {
+    if (!name) return;
+    giacEvaluateRaw(`purge(${name})`);
+    setDefinitions(applyEntryToDefinitions(state.definitions, `purge(${name})`, { isError: false }));
+  }
+
+  // "Move" the embedded panel into its own window: the popup fetches the current rows/view
+  // over the bridge (mode=move, see plotStandalone.js) instead of starting blank, and the
+  // embedded copy closes and resets so the plot isn't left open in two places at once.
+  function popOutPlot() {
+    plotHandoff = { rows: state.plotRows, view: state.plotView };
+    const url = `${window.location.origin}${window.location.pathname}?popout=plot&session=${sessionId}&mode=move`;
+    window.open(url, `onlinecas-plot-${sessionId}-${Math.random().toString(36).slice(2)}`, 'width=1000,height=700');
+    state.plotOpen = false;
+    if (state.mobileView === 'plot') state.mobileView = state.tableOpen ? 'table' : 'calculator';
+    unmountPlotPanel();
+    state.plotRows = [makeRow()];
+    state.plotView = DEFAULT_VIEW;
+    renderLayout();
+  }
+
+  // ---------- boot ----------
+
+  renderLayout();
+  renderStatus();
+  renderHistoryEmptyState();
+  renderWarning();
+
+  ensureGiacLoaded().then(
+    () => {
+      state.status = 'ready';
+      renderStatus();
+      renderHistoryEmptyState();
+      // Push the current settings into the engine once it's up, so its own defaults
+      // (radian, exact) can never silently diverge from what the UI shows.
+      giacEvaluateRaw(state.angleMode === 'DEG' ? 'angle_radian(0)' : 'angle_radian(1)');
+      giacEvaluateRaw(state.approxMode ? 'approx_mode(1)' : 'approx_mode(0)');
+      input.focus();
+
+      // Answers eval requests from any window this session pops the plot panel out into
+      // (see plotStandalone.js) so it can reuse this same Giac session's variables and
+      // functions.
+      bridgeHost = startBridgeHost({
+        sessionId,
+        evaluateRaw: giacEvaluateRaw,
+        getDefinitions: () => state.definitions,
+        getPlotState: () => plotHandoff ?? { rows: state.plotRows, view: state.plotView },
+      });
+    },
+    (err) => {
+      state.status = 'error';
+      state.error = err.message || String(err);
+      renderStatus();
+      renderHistoryEmptyState();
+    },
+  );
+}

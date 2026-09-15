@@ -1,0 +1,23 @@
+.credits-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  opacity: 0.65;
+}
+
+.credits-bar a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+}
+
+.credits-bar a:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}

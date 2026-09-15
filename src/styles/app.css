@@ -1,0 +1,741 @@
+.layout {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.layout__calc {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.layout__tabs {
+  display: none;
+}
+
+.layout__side {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .layout--split {
+    flex-direction: row;
+  }
+
+  .layout--split .layout__calc {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .layout--split .layout__side {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 20px 20px 16px 0;
+  }
+
+  .layout__side > * {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .layout--split .layout__tabs {
+    display: flex;
+    gap: 6px;
+    padding: 10px 16px 0;
+  }
+
+  .layout--split[data-mobile-view='calculator'] .layout__side {
+    display: none;
+  }
+
+  .layout--split[data-mobile-view='plot'] .layout__calc,
+  .layout--split[data-mobile-view='table'] .layout__calc {
+    display: none;
+  }
+
+  .layout--split[data-mobile-view='plot'] .layout__side,
+  .layout--split[data-mobile-view='table'] .layout__side {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding: 12px 16px 16px;
+  }
+
+  .layout--split .layout__side > * {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .layout--split[data-mobile-view='plot'] .layout__side > .layout__tableItem {
+    display: none;
+  }
+
+  .layout--split[data-mobile-view='table'] .layout__side > .layout__plotItem {
+    display: none;
+  }
+}
+
+.layout__tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.layout__tab:hover:not(.layout__tab--active) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.layout__tab--active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 20px 16px;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header__plotBtn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.header__plotBtn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.3);
+}
+
+.header__plotBtn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.header__plotBtn--active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.header__plotBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.header h1 {
+  font-size: 22px;
+  letter-spacing: -0.3px;
+  background: linear-gradient(100deg, var(--text-h) 40%, var(--accent) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: fadeInUp 0.4s ease;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.status-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.status-pill--ready {
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.4);
+  background: rgba(22, 163, 74, 0.1);
+  animation: fadeIn 0.3s ease;
+}
+
+.status-pill--loading {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.status-pill--loading::before,
+.status-pill--busy::before {
+  animation: softPulse 1.1s ease-in-out infinite;
+}
+
+.status-pill--busy {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.status-pill--error {
+  color: var(--error);
+  border-color: var(--error);
+  background: var(--error-bg);
+}
+
+.history {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 200px;
+}
+
+.empty-hint {
+  margin: auto;
+  text-align: center;
+  color: var(--text);
+  padding: 24px;
+}
+
+.empty-hint ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.empty-hint {
+  animation: fadeIn 0.35s ease;
+}
+
+.empty-hint li {
+  font-family: var(--mono);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
+.empty-hint li:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateX(2px);
+}
+
+.empty-hint__small {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 8px;
+}
+
+.loading-bar {
+  width: 160px;
+  height: 4px;
+  margin: 0 auto 16px;
+  border-radius: 999px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.loading-bar__fill {
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2, var(--accent)));
+  animation: loadingSlide 1.2s ease-in-out infinite;
+}
+
+@keyframes loadingSlide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+
+.empty-hint--error {
+  color: var(--error);
+}
+
+.entry {
+  position: relative;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  animation: fadeInUp 0.25s ease;
+}
+
+.entry:hover {
+  background: var(--code-bg);
+}
+
+.entry__delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 14px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+}
+
+.entry:hover .entry__delete,
+.entry__delete:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.entry__delete:hover {
+  border-color: var(--error);
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.entry--error .entry__output {
+  color: var(--error);
+}
+
+.entry__input,
+.entry__output {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-radius: 5px;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  /* An input/output can render wider than the panel (a long expression, a big
+     fraction/matrix from MathJax) - scroll it horizontally instead of clipping or
+     blowing out the layout. Focusing the row (click, or Up/Down selection - see
+     handleKeyDown in App.jsx) lets the arrow keys drive this scroll. */
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.entry__input {
+  color: var(--text-h);
+}
+
+.entry__input--selected,
+.entry__output--selected {
+  background: var(--accent-bg);
+  outline: 1px solid var(--accent-border);
+}
+
+.entry__prompt {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  opacity: 0.75;
+  width: 44px;
+  /* Stays put as the row scrolls horizontally, so the In[]/Out[] label is never
+     scrolled out of view. Needs an opaque backdrop (not just var(--accent-bg) etc.,
+     which are translucent tints over the panel) or scrolled-under digits show through. */
+  position: sticky;
+  left: 0;
+  background-color: var(--panel);
+}
+
+.entry:hover .entry__prompt {
+  background-image: linear-gradient(var(--code-bg), var(--code-bg));
+}
+
+.entry .entry__input--selected .entry__prompt,
+.entry .entry__output--selected .entry__prompt {
+  background-image: linear-gradient(var(--accent-bg), var(--accent-bg));
+}
+
+.entry__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.entry__inputText,
+.entry__plainText,
+.entry__errorText {
+  font-family: var(--mono);
+  font-size: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.entry__errorText {
+  color: var(--error);
+}
+
+.entry__math {
+  font-size: 15px;
+  /* MathJax's CHTML output is a run of many small inline elements (one per glyph/token),
+     which the browser will happily line-wrap between like words unless told not to - that
+     silently turned "too wide" into "absurdly tall" instead of the intended horizontal
+     scroll (see overflow-x on .entry__input/.entry__output above). */
+  white-space: nowrap;
+}
+
+/* The raw text shown alongside the rendered form when "Show text output" is on (see
+   SettingsMenu) - a plain-text fallback next to the LaTeX so a rendering bug (like a
+   truncated derivative prime) is obvious without disabling rendering entirely. */
+.entry__rawText {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.55;
+  /* Sits next to .entry__math in a row that scrolls horizontally rather than wraps (see
+     overflow-x above) - letting this wrap while math doesn't would starve it of width and
+     collapse it into an extremely tall single-character-per-line column instead. */
+  white-space: pre;
+  text-align: right;
+}
+
+.entry__output {
+  margin-top: 2px;
+}
+
+.entry__copied {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin: 14px 0 10px;
+}
+
+@media (max-width: 560px) {
+  .toolbar {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .toolbar__btn {
+    font-size: 13px;
+  }
+
+  .entry__content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .entry__rawText {
+    text-align: left;
+  }
+}
+
+.toolbar__btn {
+  padding: 8px 4px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.toolbar__btn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+  background: var(--accent-bg);
+}
+
+.toolbar__btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.toolbar__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.formula-preview {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  margin-top: 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  overflow-x: auto;
+  color: var(--text-h);
+  transition: border-color 0.2s ease;
+}
+
+.formula-preview:not(.formula-preview--empty) {
+  border-color: var(--accent-border);
+}
+
+.formula-preview--empty {
+  color: var(--text);
+  opacity: 0.55;
+  font-size: 13px;
+  font-family: var(--mono);
+}
+
+.formula-preview mjx-container {
+  margin: 0 !important;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.input-row__field {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 17px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  outline: none;
+}
+
+.input-row__field:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.input-row__field:disabled {
+  opacity: 0.6;
+}
+
+.input-row__submit {
+  width: 52px;
+  font-size: 20px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.input-row__submit:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -4px var(--accent-border);
+}
+
+.input-row__submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.input-row__submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.input-row__submit--stop {
+  width: auto;
+  padding: 0 16px;
+  font-size: 14px;
+  border-color: var(--error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.input-row__submit--stop:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+.warning-bar {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--error);
+  background: var(--error-bg);
+  color: var(--error);
+  font-size: 13px;
+}
+
+.hint-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+/* Printing (or "Save as PDF" from the print dialog) only makes sense for the history -
+   everything else here is an input control with no meaning on paper, so it's hidden and
+   the history is unclipped from its normal scrolling box to flow across pages instead. */
+@media print {
+  .layout__tabs,
+  .layout__side,
+  .header__actions,
+  .toolbar,
+  .formula-preview,
+  .input-row,
+  .warning-bar,
+  .hint-bar,
+  .credits-bar {
+    display: none !important;
+  }
+
+  /* !important here beats the mobile calculator/plot tab-switching rules (which win on
+     specificity alone, print media or not) so the history stays visible on paper even when
+     the plot tab was the one showing on screen when Print was clicked. */
+  .layout,
+  .layout__calc,
+  .app {
+    display: block !important;
+    height: auto;
+    min-height: 0;
+    background: #fff;
+  }
+
+  .app {
+    max-width: none;
+    width: auto;
+    margin: 0;
+    padding: 0;
+  }
+
+  .header {
+    margin-bottom: 12px;
+  }
+
+  .header h1 {
+    color: #000;
+  }
+
+  .history {
+    overflow: visible;
+    max-height: none;
+    min-height: 0;
+    border: none;
+    box-shadow: none;
+    background: #fff;
+    padding: 0;
+  }
+
+  .entry {
+    cursor: default;
+    border: none;
+    break-inside: avoid;
+  }
+
+  .entry:hover {
+    background: none;
+  }
+
+  .entry__input,
+  .entry__output {
+    color: #000 !important;
+  }
+
+  .entry--error .entry__output {
+    color: #b91c1c !important;
+  }
+
+  .entry__rawText {
+    color: #000 !important;
+  }
+
+  .entry__input--selected,
+  .entry__output--selected {
+    background: none;
+    outline: none;
+  }
+
+  .entry__prompt {
+    color: #555 !important;
+    opacity: 1;
+  }
+
+  .entry__copied,
+  .entry__delete {
+    display: none;
+  }
+}
+
+

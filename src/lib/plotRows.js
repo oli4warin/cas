@@ -1,0 +1,22 @@
+// Shared row/view model for the plot panel, used by both the embedded panel's host
+// (App.jsx) and a popped-out standalone window (PlotStandalone.jsx) since both now own
+// this state themselves and pass it into <PlotPanel> as controlled props.
+
+export const DEFAULT_VIEW = { xmin: -10, xmax: 10, ymin: -6, ymax: 6 };
+const DEFAULT_TMIN = 0;
+const DEFAULT_TMAX = 2 * Math.PI;
+
+let nextRowId = 1;
+export function makeRow() {
+  return {
+    id: nextRowId++,
+    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter'
+    expr: '',
+    exprX: '',
+    exprY: '',
+    exprZ: '',
+    tmin: DEFAULT_TMIN,
+    tmax: DEFAULT_TMAX,
+    visible: true,
+  };
+}
