@@ -165,10 +165,12 @@ export function mountApp(root) {
   stopBtn.style.display = 'none';
 
   // Floats directly under the input, overlapping the toolbar below it rather than pushing
-  // it down, while Tab completion has more than one candidate - see startCompletion/
-  // selectCompletion/hideCompletions. Arrow keys, Tab and mouse clicks all select a candidate
-  // (see handleKeyDown); items use tabindex="-1" so clicking one never steals focus via the
-  // browser's own tab order, only via the explicit selection logic here.
+  // it down, while a completion session is open - opened automatically as the user types a
+  // matching identifier (see updateLiveCompletions) or explicitly via Tab (see tryCompleteWord);
+  // both go through startCompletion/selectCompletion/hideCompletions. Arrow keys, Tab and mouse
+  // clicks all select a candidate, Escape dismisses the list (see handleKeyDown); items use
+  // tabindex="-1" so clicking one never steals focus via the browser's own tab order, only via
+  // the explicit selection logic here.
   const completionsBar = h('div', { class: 'completions-bar' });
   completionsBar.style.display = 'none';
   const inputRow = h('div', { class: 'input-row' }, input, submitBtn, stopBtn, completionsBar);
@@ -187,7 +189,7 @@ export function mountApp(root) {
     { class: 'hint-bar' },
     h('span', null, '↑ / ↓ select an output or input'),
     h('span', null, 'Enter/Tab insert selection at cursor'),
-    h('span', null, 'Tab complete a function name - ↑/↓/Tab cycle candidates, Enter or click confirms'),
+    h('span', null, 'Function names suggest as you type - Tab picks a candidate, then ←/→/Tab cycle, Enter or click confirms, Esc dismisses'),
     h('span', null, 'Enter evaluate (no selection)'),
     h('span', null, 'Ctrl+Enter evaluate numerically'),
     h('span', null, 'Enter on empty input repeats the last one'),
@@ -426,7 +428,7 @@ export function mountApp(root) {
 
   function onInputChanged() {
     updatePreview();
-    hideCompletions();
+    updateLiveCompletions();
     if (state.navPos >= 0) {
       state.navPos = -1;
       updateSelection();
@@ -541,17 +543,41 @@ export function mountApp(root) {
     renderCompletions();
   }
 
-  // Completes the identifier before the caret against known Giac/Xcas command names (see
-  // lib/xcasCommands.js) and the user's own defined variables/functions, matched
-  // case-insensitively (so "fmax" + Tab fixes itself into "fMax"). A single match completes
-  // (and fixes its case) immediately; several matches fill in as far as they agree and open
-  // an interactive session (see startCompletion) for arrow keys/Tab/click to pick among; no
-  // match leaves the input untouched so Tab falls back to its history-insert behavior below.
+  // Known Giac/Xcas command names (see lib/xcasCommands.js) and the user's own defined
+  // variables/functions whose name starts with `word`, matched case-insensitively (so typing
+  // "fmax" matches "fMax") and sorted for display.
+  function matchCompletions(word) {
+    const names = new Set([...STATIC_COMPLETION_NAMES, ...state.definitions.keys()]);
+    return [...names].filter((name) => name.length >= word.length && name.toLowerCase().startsWith(word.toLowerCase())).sort();
+  }
+
+  // Refreshes the completion dropdown as the user types (see onInputChanged), without
+  // touching the input's text - unlike tryCompleteWord below, this never auto-fills anything,
+  // since doing so under the user's still-moving cursor would fight with their typing. It just
+  // keeps the candidate list (if any) in sync with the identifier currently under the caret, so
+  // the dropdown appears on its own - useful on mobile, where Tab isn't easily reachable.
+  // Arrow keys/Tab/Enter/click (see handleKeyDown/renderCompletions) then pick a candidate.
+  function updateLiveCompletions() {
+    const word = wordBeforeCursor();
+    if (!word) return hideCompletions();
+    const matches = matchCompletions(word);
+    if (matches.length === 0 || (matches.length === 1 && matches[0] === word)) return hideCompletions();
+    const pos = input.selectionStart;
+    const start = pos - word.length;
+    startCompletion(matches, start, pos);
+  }
+
+  // Completes the identifier before the caret the same way (see matchCompletions), but as an
+  // explicit action: a single match completes (and fixes its case) immediately; several matches
+  // fill in as far as they agree and open an interactive session (see startCompletion) for arrow
+  // keys/Tab/click to pick among; no match leaves the input untouched so Tab falls back to its
+  // history-insert behavior below. In practice updateLiveCompletions above has usually already
+  // opened a session by the time Tab is pressed, so this mainly matters right after the caret
+  // moves into a word without any typing (e.g. a mouse click) - the live update never fires then.
   function tryCompleteWord() {
     const word = wordBeforeCursor();
     if (!word) return false;
-    const names = new Set([...STATIC_COMPLETION_NAMES, ...state.definitions.keys()]);
-    const matches = [...names].filter((name) => name.length >= word.length && name.toLowerCase().startsWith(word.toLowerCase())).sort();
+    const matches = matchCompletions(word);
     if (matches.length === 0) return false;
     const pos = input.selectionStart;
     const start = pos - word.length;
@@ -616,19 +642,38 @@ export function mountApp(root) {
   // ---------- key handling ----------
 
   function handleKeyDown(e) {
-    // While a completion session is open, Up/Down/Tab move the highlighted candidate
-    // (wrapping around) and Enter confirms whichever one is currently filled into the input
-    // - handled first, before anything below (including the catch-all that would otherwise
-    // drop the list) can see these keys.
+    // A completion session can be open just because the user is typing (see
+    // updateLiveCompletions) without them having asked to pick from it - so Up/Down always
+    // stay history browsing's (below), never the dropdown's, and Left/Right only move
+    // between candidates once Tab has actually engaged it (completionIndex >= 0; Tab always
+    // moves it to 0 or beyond). Until then, or once Escape backs out again, Left/Right fall
+    // through untouched to their usual job (moving the text cursor). Handled first, before
+    // anything below (including the catch-all that would otherwise drop the list) sees these
+    // keys.
     if (completionMatches.length > 0) {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab') {
+      if (e.key === 'Tab') {
         e.preventDefault();
-        selectCompletion(completionIndex + (e.key === 'ArrowUp' ? -1 : 1));
+        selectCompletion(completionIndex + 1);
         return;
       }
-      if (e.key === 'Enter') {
+      if (completionIndex >= 0 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        selectCompletion(completionIndex + (e.key === 'ArrowLeft' ? -1 : 1));
+        return;
+      }
+      if (completionIndex >= 0 && e.key === 'Enter') {
         e.preventDefault();
         hideCompletions();
+        return;
+      }
+      // Escape backs out of completion mode only - it dismisses the dropdown and hands
+      // Up/Down and Left/Right straight back to their usual jobs (below) without also
+      // touching navPos or any warning, so a second Escape is free to do its own usual thing.
+      // The explicit focus() guards against focus having landed anywhere else (e.g. a tap on
+      // a candidate on mobile) so the caret is always back in the input, ready to keep typing.
+      if (e.key === 'Escape') {
+        hideCompletions();
+        input.focus();
         return;
       }
     }

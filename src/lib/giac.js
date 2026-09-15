@@ -183,6 +183,66 @@ export function normalizePowerCalls(expr) {
   return out;
 }
 
+function findMatchingBracket(s, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < s.length; i++) {
+    if (s[i] === '[') depth++;
+    else if (s[i] === ']') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+// Splits `s` on `sep` only where it isn't nested inside ()/[]/{}, e.g. splitting
+// "f(1,2),3;4" on ";" gives ["f(1,2),3", "4"] rather than cutting inside the call.
+function splitTopLevel(s, sep) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === sep && depth === 0) {
+      parts.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
+// Giac's own matrix literal syntax is nested brackets, "[[1,2],[3,4]]" - it doesn't
+// understand the TI-Nspire shorthand "[1,2;3,4]" (semicolons as row separators) at all, so
+// this expands that shorthand into Giac's own form before anything reaches the engine.
+// Only semicolons that sit directly inside a "[...]" (not inside a further-nested call's
+// parens, e.g. "[f(1,2),3;4,5]") count as row separators, and a bracket with no semicolon
+// in it (an ordinary list/vector, or Giac's own "[[...],[...]]" form) is left untouched. A
+// stray trailing ";" right before "]" (a row nspire itself tolerates) is dropped rather
+// than turned into a bogus empty last row.
+export function normalizeNspireMatrices(expr) {
+  let out = '';
+  let i = 0;
+  const n = expr.length;
+  while (i < n) {
+    if (expr[i] === '[') {
+      const close = findMatchingBracket(expr, i);
+      if (close !== -1) {
+        const inner = normalizeNspireMatrices(expr.slice(i + 1, close));
+        const rows = splitTopLevel(inner, ';').filter((row, idx, arr) => row.trim() !== '' || idx !== arr.length - 1);
+        out += rows.length > 1 ? `[${rows.map((row) => `[${row}]`).join(',')}]` : `[${inner}]`;
+        i = close + 1;
+        continue;
+      }
+    }
+    out += expr[i];
+    i++;
+  }
+  return out;
+}
+
 // Low-level access to the engine for callers (plotting) that need to run their own
 // caseval expression and parse the raw string themselves, skipping the scalar-result
 // shaping (quote stripping, latex round-trip) that evaluate() does.
@@ -206,8 +266,11 @@ function stripTrailingSemicolon(s) {
 async function fetchLatex(out) {
   let latexOut = await rawEvalAsync(`latex(quote(${out}))`);
   if (latexOut.startsWith('GIAC_ERROR')) return null;
+  // Giac never doubles up backslashes in its raw output - a run of two is always a
+  // genuine LaTeX "\\" row-break (e.g. inside a matrix's \begin{array}{cc}...\end{array}),
+  // so it must survive untouched; collapsing it to one (an earlier version of this code did)
+  // corrupted every matrix/piecewise ("\begin{cases}") result into a single garbled row.
   return stripQuotes(latexOut)
-    .replace(/\\\\/g, '\\')
     .replace(/\\"/g, '"')
     // Giac's own latex() has a bug for squared trig functions: it emits e.g.
     // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
@@ -222,7 +285,7 @@ async function fetchLatex(out) {
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
 export async function evaluate(expr) {
-  let out = stripTrailingSemicolon(await rawEvalAsync(normalizePowerCalls(expr)));
+  let out = stripTrailingSemicolon(await rawEvalAsync(normalizePowerCalls(normalizeNspireMatrices(expr))));
 
   if (out.startsWith('GIAC_ERROR')) {
     return { raw: out, isError: true, text: out.slice(11).trim(), latex: null, isGraphics: false };
@@ -352,7 +415,7 @@ const EXACT_DECIMAL_TAIL_RE = /^(.+)=(-?\d+\.\d+)$/;
 //   terminate (1/3 -> 0.3333...) or isn't rational to begin with (sqrt(2), pi, ...).
 //   1/2 -> 0.5 is exact, so it gets no marker.
 export async function evaluateApprox(expr) {
-  const normalized = normalizePowerCalls(expr);
+  const normalized = normalizePowerCalls(normalizeNspireMatrices(expr));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown

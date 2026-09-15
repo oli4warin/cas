@@ -8,18 +8,27 @@
 // path needs a fully-parseable expression and a worker round trip, both wrong fits for a
 // per-keystroke preview.
 
-const UNARY_PREC = 5; // same as '^', so "-x^2" parses as -(x^2), matching math convention.
+const UNARY_PREC = 7; // same as '^', so "-x^2" parses as -(x^2), matching math convention.
 
 // '|' (Giac's restriction/"such that" operator, e.g. "solve(x^2=1|x>0)") binds loosest of
-// all, below comparisons - so its right side can itself be a whole "x>0" comparison.
+// all, below the logical connectives, which in turn bind looser than comparisons - so
+// "x=1 and y=2" parses as "(x=1) and (y=2)", and "or" binds looser still than "and" (so
+// "a=1 or b=2 and c=3" reads as "a=1 or (b=2 and c=3)"), matching everyday math convention.
 const INFIX_PREC = {
   '|': 0,
-  ':=': 1, '=': 1, '<': 1, '>': 1, '<=': 1, '>=': 1, '!=': 1, '==': 1,
-  '+': 2, '-': 2,
-  '*': 3, '/': 3,
-  '^': 5,
+  or: 1,
+  and: 2,
+  ':=': 3, '=': 3, '<': 3, '>': 3, '<=': 3, '>=': 3, '!=': 3, '==': 3,
+  '+': 4, '-': 4,
+  '*': 5, '/': 5,
+  '^': 7,
 };
 const RIGHT_ASSOC = new Set(['^']);
+
+// Giac's word-shaped infix boolean operators - tokenized as ops (see tokenize) rather than
+// identifiers so they don't fall into implicit multiplication (e.g. "1 and y" turning into
+// "1 * and * y") and instead render as spaced-out \text{...} words (see renderBin).
+const LOGICAL_WORDS = new Set(['and', 'or', 'xor']);
 
 const GREEK = {
   pi: '\\pi', theta: '\\theta', alpha: '\\alpha', beta: '\\beta', gamma: '\\gamma',
@@ -59,11 +68,17 @@ function tokenize(s) {
     }
     if (/[A-Za-z_]/.test(c)) {
       const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(s.slice(i));
-      tokens.push({ type: 'ident', value: m[0] });
-      i += m[0].length;
+      const word = m[0];
+      const lword = word.toLowerCase();
+      if (LOGICAL_WORDS.has(lword)) {
+        tokens.push({ type: 'op', value: lword });
+      } else {
+        tokens.push({ type: 'ident', value: word });
+      }
+      i += word.length;
       continue;
     }
-    if ("'+-*/^=<>(),!.[]{}|".includes(c)) {
+    if ("'+-*/^=<>(),;!.[]{}|".includes(c)) {
       tokens.push({ type: 'op', value: c });
       i++;
       continue;
@@ -137,13 +152,33 @@ function makeParser(tokens) {
     return node;
   }
 
+  // Parses a comma-separated list up to `closeChar`. A ";" at this level (nspire's
+  // shorthand for a matrix literal, e.g. "[1,2;3,4]") starts a new row instead of a plain
+  // item - when at least one was seen, each row is wrapped as its own bracket node so the
+  // preview nests exactly like Giac's own "[[1,2],[3,4]]" form (see normalizeNspireMatrices
+  // in lib/giac.js, which expands the same shorthand before the real expression is
+  // evaluated). A stray trailing ";" right before `closeChar` is dropped rather than
+  // producing a bogus empty last row.
   function parseArgList(closeChar) {
-    const items = [];
+    const rows = [[]];
     if (peek() && !(peek().type === 'op' && peek().value === closeChar)) {
-      items.push(parseExpression(0));
-      while (peek() && peek().type === 'op' && peek().value === ',') {
-        next();
-        items.push(parseExpression(0));
+      rows[rows.length - 1].push(parseExpression(0));
+      for (;;) {
+        const tok = peek();
+        if (tok && tok.type === 'op' && tok.value === ',') {
+          next();
+          rows[rows.length - 1].push(parseExpression(0));
+          continue;
+        }
+        if (tok && tok.type === 'op' && tok.value === ';') {
+          next();
+          rows.push([]);
+          if (peek() && !(peek().type === 'op' && (peek().value === closeChar || peek().value === ';'))) {
+            rows[rows.length - 1].push(parseExpression(0));
+          }
+          continue;
+        }
+        break;
       }
     }
     let closed = false;
@@ -151,7 +186,11 @@ function makeParser(tokens) {
       next();
       closed = true;
     }
-    return { items, closed };
+    if (rows.length > 1) {
+      const items = rows.filter((row) => row.length > 0).map((row) => ({ type: 'bracket', items: row, closed: true }));
+      return { items, closed };
+    }
+    return { items: rows[0], closed };
   }
 
   function parsePrimary() {
@@ -218,6 +257,24 @@ function escapeText(s) {
   return String(s).replace(/\\/g, '\\textbackslash{}').replace(/([{}$&#_%~^])/g, '\\$1');
 }
 
+// A bracket-of-brackets with every row the same width is exactly Giac's own definition of
+// a matrix (see normalizeNspireMatrices in lib/giac.js, which produces this same nested
+// shape from both "[[1,2],[3,4]]" and the nspire "[1,2;3,4]" shorthand) - rendered as a
+// grid (see renderMatrix) to match what Giac's own latex() shows for the evaluated result,
+// rather than as a confusing list-of-lists.
+function isMatrixNode(node) {
+  if (node.type !== 'bracket' || node.items.length === 0) return false;
+  if (!node.items.every((row) => row && row.type === 'bracket' && row.items.length > 0)) return false;
+  const width = node.items[0].items.length;
+  return node.items.every((row) => row.items.length === width);
+}
+
+function renderMatrix(node) {
+  const cols = node.items[0].items.length;
+  const body = node.items.map((row) => row.items.map(render).join(' & ')).join(' \\\\\n');
+  return `\\left(\\begin{array}{${'c'.repeat(cols)}}\n${body}\n\\end{array}\\right)`;
+}
+
 function render(node) {
   if (node == null) return '';
   switch (node.type) {
@@ -238,7 +295,7 @@ function render(node) {
     case 'paren':
       return `\\left(${render(node.inner)}\\right)`;
     case 'bracket':
-      return `\\left[${node.items.map(render).join(',\\ ')}\\right]`;
+      return isMatrixNode(node) ? renderMatrix(node) : `\\left[${node.items.map(render).join(',\\ ')}\\right]`;
     case 'brace':
       return `\\left\\{${node.items.map(render).join(',\\ ')}\\right\\}`;
     case 'call':
@@ -277,6 +334,11 @@ function renderBin(node) {
   if (node.op === '^') return `${renderPowerBase(node.left)}^{${render(node.right)}}`;
   if (node.op === '*') return `${render(node.left)} \\cdot ${render(node.right)}`;
   if (node.op === '*implicit') return `${render(node.left)}${render(node.right)}`;
+  // Word operators ("and"/"or"/"xor") need an explicit \text{} (plain math-mode letters
+  // would space and slant like a product of variables, e.g. "a n d") and explicit \ spacing
+  // (bare spaces in math-mode source are collapsed, so without it the word would run into
+  // its operands with no visible gap).
+  if (LOGICAL_WORDS.has(node.op)) return `${render(node.left)}\\ \\text{${node.op}}\\ ${render(node.right)}`;
   const sym = BIN_LATEX[node.op] ?? node.op;
   return `${render(node.left)} ${sym} ${render(node.right)}`;
 }

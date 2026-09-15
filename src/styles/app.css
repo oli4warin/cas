@@ -642,12 +642,14 @@
   opacity: 0.75;
 }
 
-/* Lists the candidates Tab completion found for the word under the cursor - floats over
-   the toolbar below the input (see the input-row wiring in app.js) instead of pushing it
-   down, and scrolls internally once there are more candidates than fit. Arrow keys, Tab and
-   clicking an item all move/confirm the highlighted candidate (see selectCompletion in
-   app.js); items are plain spans with tabindex="-1" so clicking one can't hand the browser's
-   own focus/tab order anything to fight over - the input stays focused throughout. */
+/* Lists the candidates found for the word under the cursor - opened automatically as the
+   user types or explicitly via Tab (see updateLiveCompletions/tryCompleteWord in app.js).
+   Floats over the toolbar below the input (see the input-row wiring in app.js) instead of
+   pushing it down, and scrolls internally once there are more candidates than fit. Arrow
+   keys, Tab and clicking an item all move/confirm the highlighted candidate, Escape dismisses
+   the list (see selectCompletion/handleKeyDown in app.js); items are plain spans with
+   tabindex="-1" so clicking one can't hand the browser's own focus/tab order anything to
+   fight over - the input stays focused throughout. */
 .completions-bar {
   position: absolute;
   top: calc(100% + 6px);
