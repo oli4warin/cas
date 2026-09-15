@@ -385,7 +385,19 @@ function renderCall(node) {
     return `\\prod ${a(0)}`;
   }
 
-  const label = name.length > 1 ? `\\operatorname{${escapeText(name)}}` : name;
+  // 2-argument binomial(n,k)/comb(n,k)/ncr(n,k) is the binomial coefficient "n choose k" -
+  // the 3-argument form, binomial(n,k,p), is the binomial distribution's pmf instead and
+  // falls through to the generic \operatorname rendering below.
+  if ((lname === 'binomial' || lname === 'comb' || lname === 'ncr') && has(1) && !has(2)) {
+    return `\\binom{${a(0)}}{${a(1)}}`;
+  }
+
+  // "_" has catcode "subscript" throughout MathJax's TeX input (that's fixed at
+  // tokenization, not toggled by mode-switching macros like \text{} - wrapping in \text{}
+  // alone does NOT stop "binomial_cdf" from starting a subscript at the "_"), so the only
+  // way to get a literal underscore is to escape it. Safe to escape blindly: the tokenizer
+  // only ever produces identifiers made of [A-Za-z0-9_].
+  const label = name.length > 1 ? `\\operatorname{${name.replace(/_/g, '\\_')}}` : name;
   return `${label}${primes}\\left(${args.map((x) => (x != null ? render(x) : '')).join(',\\ ')}\\right)`;
 }
 

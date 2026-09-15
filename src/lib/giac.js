@@ -111,12 +111,13 @@ export function looksIncomplete(expr) {
   return depth > 0;
 }
 
-// Giac's default display shows non-integer rationals as "exact=decimal" (e.g. "1/2=0.5") -
-// nice to read, but not something you want copied verbatim into a new expression. Only
-// strip the "=decimal" tail when the left side is itself plain numeric, so a genuine
-// equation result (e.g. "x=5" from solve) is left untouched.
+// Giac's default display auto-appends "=<decimal>" to any non-integer exact result, both
+// rational (e.g. "1/2=0.5") and irrational (e.g. "sqrt(2)=1.4142135623731") - nice to read,
+// but not something you want copied verbatim into a new expression. Strip that tail
+// whenever it's present (see EXACT_DECIMAL_TAIL_RE below for why a genuine equation result
+// like "x=5" from solve is left untouched: its right side never has a decimal point).
 export function reinsertableValue(raw) {
-  const m = raw.match(/^(-?\d+(?:\/\d+)?)=(-?\d+(?:\.\d+)?)$/);
+  const m = raw.match(EXACT_DECIMAL_TAIL_RE);
   return m ? m[1] : raw;
 }
 
@@ -181,6 +182,18 @@ export function normalizePowerCalls(expr) {
     i++;
   }
   return out;
+}
+
+// Giac itself has no "ncr" identifier (only "nCr", "comb" and "binomial" are real function
+// names there) - typing the all-lowercase calculator-familiar spelling would otherwise reach
+// the engine as an unknown identifier and fail to evaluate, even though the live preview (see
+// giacToLatex.js, which recognizes the same spelling) happily renders it as \binom{n}{k}.
+// Rewriting it to "comb" here, case-insensitively, before the expression ever reaches the
+// engine keeps both spellings ("ncr" and the already-working "nCr") calculating identically.
+const NCR_ALIAS_RE = /\bncr(?=\s*\()/gi;
+
+export function normalizeNcrAlias(expr) {
+  return expr.replace(NCR_ALIAS_RE, 'comb');
 }
 
 function findMatchingBracket(s, openIdx) {
@@ -285,7 +298,9 @@ async function fetchLatex(out) {
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
 export async function evaluate(expr) {
-  let out = stripTrailingSemicolon(await rawEvalAsync(normalizePowerCalls(normalizeNspireMatrices(expr))));
+  let out = stripTrailingSemicolon(
+    await rawEvalAsync(normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(expr)))),
+  );
 
   if (out.startsWith('GIAC_ERROR')) {
     return { raw: out, isError: true, text: out.slice(11).trim(), latex: null, isGraphics: false };
@@ -415,7 +430,7 @@ const EXACT_DECIMAL_TAIL_RE = /^(.+)=(-?\d+\.\d+)$/;
 //   terminate (1/3 -> 0.3333...) or isn't rational to begin with (sqrt(2), pi, ...).
 //   1/2 -> 0.5 is exact, so it gets no marker.
 export async function evaluateApprox(expr) {
-  const normalized = normalizePowerCalls(normalizeNspireMatrices(expr));
+  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(expr)));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
