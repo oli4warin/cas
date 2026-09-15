@@ -1,0 +1,121 @@
+// The full Giac/Xcas command set offered by input tab completion (see tryCompleteWord in
+// app.js) - much broader than the handful curated in components/functionsMenu.js. Keys are
+// matched case-insensitively against whatever the user is typing; values are short
+// descriptions shown as each completion candidate's tooltip.
+export const XCAS_COMMANDS = {
+  // Arithmetic & number theory
+  abs: 'absolute value',
+  gcd: 'greatest common divisor',
+  lcm: 'least common multiple',
+  irem: 'remainder of integer division',
+  iquo: 'quotient of integer division',
+  isprime: 'primality test',
+  ifactor: 'prime factorization',
+  divisors: 'list of divisors',
+  euler: "Euler's totient function",
+  nextprime: 'smallest prime greater than n',
+  prevprime: 'largest prime less than n',
+  floor: 'round down',
+  ceil: 'round up',
+  round: 'round to n decimals',
+  trunc: 'truncate to an integer',
+  sign: 'sign of a number',
+  mod: 'modulo',
+  powmod: 'modular exponentiation',
+  sqrt: 'square root',
+  exp: 'exponential function',
+  ln: 'natural logarithm',
+  log: 'logarithm',
+  log10: 'base-10 logarithm',
+
+  // Algebra
+  solve: 'solve an equation',
+  fsolve: 'numerically solve an equation',
+  linsolve: 'solve a linear system',
+  factor: 'factor an expression',
+  expand: 'expand an expression',
+  simplify: 'simplify an expression',
+  normal: 'put an expression in normal form',
+  partfrac: 'partial fraction decomposition',
+  subst: 'substitute a value',
+  collect: 'collect terms by a variable',
+  coeff: 'coefficient of a term',
+  degree: 'degree of a polynomial',
+  proot: 'roots of a polynomial',
+  quo: 'polynomial quotient',
+  rem: 'polynomial remainder',
+  resultant: 'resultant of two polynomials',
+
+  // Trigonometry
+  sin: 'sine',
+  cos: 'cosine',
+  tan: 'tangent',
+  asin: 'arcsine',
+  acos: 'arccosine',
+  atan: 'arctangent',
+  sinh: 'hyperbolic sine',
+  cosh: 'hyperbolic cosine',
+  tanh: 'hyperbolic tangent',
+  asinh: 'inverse hyperbolic sine',
+  acosh: 'inverse hyperbolic cosine',
+  atanh: 'inverse hyperbolic tangent',
+  cot: 'cotangent',
+
+  // Calculus
+  diff: 'derivative',
+  integrate: 'antiderivative / definite integral',
+  limit: 'limit',
+  series: 'series expansion',
+  taylor: 'Taylor series',
+  sum: 'sum of a sequence',
+  product: 'product of a sequence',
+  fMax: 'function maximum',
+  fMin: 'function minimum',
+  desolve: 'solve a differential equation',
+
+  // Linear algebra
+  det: 'determinant',
+  inv: 'matrix inverse',
+  transpose: 'matrix transpose',
+  rank: 'matrix rank',
+  identity: 'identity matrix',
+  matrix: 'construct a matrix',
+  eigenvals: 'eigenvalues',
+  eigenvects: 'eigenvectors',
+  ker: 'kernel (null space)',
+  cross: 'cross product',
+  dot: 'dot product',
+  norm: 'vector/matrix norm',
+
+  // Statistics & probability
+  mean: 'arithmetic mean',
+  median: 'median',
+  stddev: 'standard deviation',
+  variance: 'variance',
+  factorial: 'n!',
+  comb: 'combinations',
+  perm: 'permutations',
+  randvector: 'random vector',
+  randnorm: 'random normal sample',
+  binomial: 'binomial distribution',
+
+  // Complex numbers
+  re: 'real part',
+  im: 'imaginary part',
+  conj: 'complex conjugate',
+  arg: 'complex argument',
+
+  // Lists & sequences
+  seq: 'build a sequence',
+  sort: 'sort a list',
+  size: 'size of a list/vector',
+  append: 'append an element',
+  reverse: 'reverse a list',
+  makelist: 'build a list from a formula',
+
+  // Programming
+  purge: 'delete a variable/function definition',
+  assume: 'assume a property of a variable',
+  piecewise: 'piecewise-defined expression',
+  when: 'conditional expression',
+};
