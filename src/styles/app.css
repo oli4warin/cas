@@ -144,7 +144,6 @@
   border-color: var(--accent-border);
   color: var(--accent);
   transform: translateY(-1px);
-  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.3);
 }
 
 .header__plotBtn:active:not(:disabled) {
@@ -164,11 +163,9 @@
 
 .header h1 {
   font-size: 22px;
-  letter-spacing: -0.3px;
-  background: linear-gradient(100deg, var(--text-h) 40%, var(--accent) 100%);
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text-h);
   animation: fadeInUp 0.4s ease;
 }
 
@@ -599,7 +596,6 @@
   background: var(--accent);
   color: #fff;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px -4px var(--accent-border);
 }
 
 .input-row__submit:active:not(:disabled) {

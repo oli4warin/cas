@@ -1,13 +1,13 @@
 :root {
-  --plot-grid: #262733;
-  --plot-axis: #6b6878;
-  --plot-tick-text: #6b6878;
+  --plot-grid: #2a333c;
+  --plot-axis: #7e8d9a;
+  --plot-tick-text: #7e8d9a;
 }
 
 :root[data-theme='light'] {
-  --plot-grid: #e4e4ea;
-  --plot-axis: #9a98a6;
-  --plot-tick-text: #71717a;
+  --plot-grid: #e6ebf0;
+  --plot-axis: #7b8a99;
+  --plot-tick-text: #7b8a99;
 }
 
 .plot-panel {
@@ -22,6 +22,7 @@
   border-radius: 8px;
   box-shadow: var(--shadow);
   overflow: hidden;
+  animation: fadeInUp 0.3s ease;
 }
 
 .plot-panel__header {
@@ -67,6 +68,7 @@
 .plot-panel__iconBtn:hover {
   border-color: var(--accent-border);
   color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .plot-panel__rows {
@@ -82,6 +84,7 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  animation: fadeInUp 0.2s ease;
 }
 
 .plot-row__swatch {
@@ -120,6 +123,7 @@
   background: var(--code-bg);
   color: var(--text);
   cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
 .plot-row__modeSelect:hover {
@@ -266,6 +270,7 @@
 .plot-chip:hover {
   border-color: var(--accent-border);
   color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .plot-panel__canvasWrap {

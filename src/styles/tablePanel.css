@@ -10,6 +10,7 @@
   border-radius: 8px;
   box-shadow: var(--shadow);
   overflow: hidden;
+  animation: fadeInUp 0.3s ease;
 }
 
 .table-panel__header {
@@ -48,6 +49,7 @@
 .table-panel__iconBtn:hover {
   border-color: var(--accent-border);
   color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .table-panel__gridWrap {

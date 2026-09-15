@@ -1,30 +1,25 @@
 :root {
-  --text: #b7b3c2;
-  --text-h: #f3f4f6;
-  --bg: #121218;
-  --panel: #191a22;
-  --border: #2c2d38;
-  --code-bg: #1f2028;
-  --accent: #a78bfa;
-  --accent-2: #7dd3fc;
-  --accent-bg: rgba(167, 139, 250, 0.15);
-  --accent-border: rgba(167, 139, 250, 0.5);
-  --error: #f87171;
-  --error-bg: rgba(248, 113, 113, 0.12);
-  --shadow:
-    rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+  --text: #aab8c4;
+  --text-h: #e4eaef;
+  --bg: #161c22;
+  --panel: #1d242b;
+  --border: #35404a;
+  --code-bg: #252d35;
+  --accent: #5fc9ae;
+  --accent-2: #82b6e0;
+  --accent-bg: #17302a;
+  --accent-border: #2f5f53;
+  --error: #e88b90;
+  --error-bg: #2e1c1e;
+  --shadow: none;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --sans: 'Fira Sans', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: 'SFMono-Regular', 'JetBrains Mono', 'Fira Mono', Menlo, Consolas, monospace;
 
   font: 16px/145% var(--sans);
   color-scheme: dark;
   color: var(--text);
-  background:
-    radial-gradient(ellipse 900px 500px at 15% -10%, var(--accent-bg), transparent 60%),
-    radial-gradient(ellipse 700px 500px at 100% 0%, rgba(125, 211, 252, 0.08), transparent 55%),
-    var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -32,20 +27,19 @@
 }
 
 :root[data-theme='light'] {
-  --text: #52525b;
-  --text-h: #18181b;
-  --bg: #f2f2f5;
-  --panel: #ffffff;
-  --border: #dcdce2;
-  --code-bg: #edecf2;
-  --accent: #7c3aed;
-  --accent-2: #0ea5e9;
-  --accent-bg: rgba(124, 58, 237, 0.1);
-  --accent-border: rgba(124, 58, 237, 0.4);
-  --error: #dc2626;
-  --error-bg: rgba(220, 38, 38, 0.08);
-  --shadow:
-    rgba(24, 24, 27, 0.08) 0 10px 15px -3px, rgba(24, 24, 27, 0.05) 0 4px 6px -2px;
+  --text: #4a5a6a;
+  --text-h: #1b2733;
+  --bg: #ffffff;
+  --panel: #f5f7f9;
+  --border: #d7dee5;
+  --code-bg: #eaeef2;
+  --accent: #0b6b58;
+  --accent-2: #1f4e79;
+  --accent-bg: #e3f1ed;
+  --accent-border: #9dcabe;
+  --error: #a4343a;
+  --error-bg: #fbeced;
+  --shadow: none;
 
   color-scheme: light;
 }

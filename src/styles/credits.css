@@ -15,6 +15,7 @@
   color: inherit;
   text-decoration: underline;
   text-decoration-color: var(--border);
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
 
 .credits-bar a:hover {
