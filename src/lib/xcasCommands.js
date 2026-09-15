@@ -30,6 +30,7 @@ export const XCAS_COMMANDS = {
 
   // Algebra
   solve: 'solve an equation',
+  csolve: 'solve an equation over the complexes',
   fsolve: 'numerically solve an equation',
   linsolve: 'solve a linear system',
   factor: 'factor an expression',
