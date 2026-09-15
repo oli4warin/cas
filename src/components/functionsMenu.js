@@ -75,20 +75,6 @@ const CATEGORIES = [
   },
 ];
 
-// Flat set of the function names shown in the menu above (e.g. 'gcd', 'sin', 'integrate'),
-// derived from each item's prefix rather than duplicated by hand - used for input tab
-// completion in app.js.
-export function knownFunctionNames() {
-  const names = new Set();
-  for (const cat of CATEGORIES) {
-    for (const item of cat.items) {
-      const m = item.prefix.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
-      if (m) names.add(m[1]);
-    }
-  }
-  return names;
-}
-
 export function FunctionsMenu({ onInsert }) {
   let open = false;
   const root = h('div', { class: 'functions-menu' });

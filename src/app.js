@@ -19,7 +19,8 @@ import { PlotPanel } from './components/plotPanel.js';
 import { TablePanel } from './components/tablePanel.js';
 import { Credits } from './components/credits.js';
 import { SettingsMenu } from './components/settingsMenu.js';
-import { FunctionsMenu, knownFunctionNames } from './components/functionsMenu.js';
+import { FunctionsMenu } from './components/functionsMenu.js';
+import { XCAS_COMMANDS } from './lib/xcasCommands.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -77,10 +78,9 @@ const TOOLBAR = [
 
 const EXAMPLES = ['integrate(sin(x)*x,x)', 'solve(x^2-5*x+6=0,x)', 'factor(x^3-1)', 'limit(sin(x)/x,x,0)'];
 
-// Names offered by input tab completion: every function from the functions menu, plus a
-// few bare constants (no parens to complete into) that don't otherwise appear there.
-const COMPLETION_CONSTANTS = ['pi', 'infinity'];
-const STATIC_COMPLETION_NAMES = [...knownFunctionNames(), ...COMPLETION_CONSTANTS];
+// Names offered by input tab completion: the full Giac/Xcas command set (see
+// lib/xcasCommands.js), not just the handful curated in the functions menu.
+const STATIC_COMPLETION_NAMES = Object.keys(XCAS_COMMANDS);
 
 export function mountApp(root) {
   const state = {
@@ -163,7 +163,15 @@ export function mountApp(root) {
   const submitBtn = h('button', { type: 'button', class: 'input-row__submit', onclick: () => submit({}) }, '=');
   const stopBtn = h('button', { type: 'button', class: 'input-row__submit input-row__submit--stop', onclick: () => cancelCurrentEval() }, 'Stop');
   stopBtn.style.display = 'none';
-  const inputRow = h('div', { class: 'input-row' }, input, submitBtn, stopBtn);
+
+  // Floats directly under the input, overlapping the toolbar below it rather than pushing
+  // it down, while Tab completion has more than one candidate - see startCompletion/
+  // selectCompletion/hideCompletions. Arrow keys, Tab and mouse clicks all select a candidate
+  // (see handleKeyDown); items use tabindex="-1" so clicking one never steals focus via the
+  // browser's own tab order, only via the explicit selection logic here.
+  const completionsBar = h('div', { class: 'completions-bar' });
+  completionsBar.style.display = 'none';
+  const inputRow = h('div', { class: 'input-row' }, input, submitBtn, stopBtn, completionsBar);
 
   const toolbar = h(
     'div',
@@ -179,7 +187,7 @@ export function mountApp(root) {
     { class: 'hint-bar' },
     h('span', null, '↑ / ↓ select an output or input'),
     h('span', null, 'Enter/Tab insert selection at cursor'),
-    h('span', null, 'Tab complete a function name'),
+    h('span', null, 'Tab complete a function name - ↑/↓/Tab cycle candidates, Enter or click confirms'),
     h('span', null, 'Enter evaluate (no selection)'),
     h('span', null, 'Ctrl+Enter evaluate numerically'),
     h('span', null, 'Enter on empty input repeats the last one'),
@@ -418,6 +426,7 @@ export function mountApp(root) {
 
   function onInputChanged() {
     updatePreview();
+    hideCompletions();
     if (state.navPos >= 0) {
       state.navPos = -1;
       updateSelection();
@@ -449,32 +458,122 @@ export function mountApp(root) {
     return upToCaret.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
   }
 
+  // Case-insensitive so a set of candidates that only differ by case (e.g. matching "fmax"
+  // against "fMax") doesn't collapse the shared prefix to nothing - the casing kept for each
+  // shared character comes from whichever candidate is first (typically enough to matter only
+  // for the handful of names that are otherwise identical letter-for-letter).
   function longestCommonPrefix(words) {
     return words.reduce((prefix, word) => {
       let i = 0;
-      while (i < prefix.length && i < word.length && prefix[i] === word[i]) i++;
+      while (i < prefix.length && i < word.length && prefix[i].toLowerCase() === word[i].toLowerCase()) i++;
       return prefix.slice(0, i);
     });
   }
 
-  // Completes the identifier before the caret against known function/constant names and the
-  // user's own defined variables/functions - a single match completes fully, several matches
-  // complete as far as they agree (classic shell-style completion), and no match leaves the
-  // input untouched so Tab falls back to its history-insert behavior below.
+  // An active Tab-completion session: the full candidate list, which one (if any) is
+  // currently highlighted, and the input range the chosen candidate currently occupies (start
+  // is fixed at the original word's position; end moves as selectCompletion swaps candidates
+  // in and out). completionMatches.length === 0 means no session is active.
+  let completionMatches = [];
+  let completionIndex = -1;
+  let completionStart = -1;
+  let completionEnd = -1;
+
+  // Renders the candidate list floating under the input (see completionsBar's wiring above) -
+  // items are clickable (mousedown, so the input never loses focus) but not part of the
+  // browser's own tab order, so Tab can never land on one by accident.
+  function renderCompletions() {
+    clear(completionsBar);
+    completionsBar.append(
+      h('span', { class: 'completions-bar__count' }, `${completionMatches.length} match${completionMatches.length === 1 ? '' : 'es'}:`),
+    );
+    completionMatches.forEach((name, idx) => {
+      const item = h(
+        'span',
+        {
+          class: `completions-bar__item${idx === completionIndex ? ' completions-bar__item--selected' : ''}`,
+          title: XCAS_COMMANDS[name] || '',
+          tabindex: -1,
+          onmousedown: (e) => {
+            e.preventDefault();
+            selectCompletion(idx);
+            hideCompletions();
+          },
+        },
+        name,
+      );
+      completionsBar.append(item);
+      if (idx === completionIndex) item.scrollIntoView({ block: 'nearest' });
+    });
+    completionsBar.style.display = '';
+  }
+
+  function hideCompletions() {
+    completionsBar.style.display = 'none';
+    completionMatches = [];
+    completionIndex = -1;
+    completionStart = -1;
+    completionEnd = -1;
+  }
+
+  // Opens an interactive completion session over `matches`, with `start`/`end` the input
+  // range the (already inserted) common-prefix fill occupies - nothing is highlighted yet, so
+  // arrow keys/Tab start from the top and Enter simply accepts the prefix as typed.
+  function startCompletion(matches, start, end) {
+    completionMatches = matches;
+    completionIndex = -1;
+    completionStart = start;
+    completionEnd = end;
+    renderCompletions();
+  }
+
+  // Moves the highlighted candidate to `index` (wrapping around both ends) and writes it
+  // into the input in place of whatever the completion range currently holds.
+  function selectCompletion(index) {
+    const n = completionMatches.length;
+    completionIndex = ((index % n) + n) % n;
+    const name = completionMatches[completionIndex];
+    input.value = input.value.slice(0, completionStart) + name + input.value.slice(completionEnd);
+    completionEnd = completionStart + name.length;
+    input.focus();
+    input.setSelectionRange(completionEnd, completionEnd);
+    updatePreview();
+    renderCompletions();
+  }
+
+  // Completes the identifier before the caret against known Giac/Xcas command names (see
+  // lib/xcasCommands.js) and the user's own defined variables/functions, matched
+  // case-insensitively (so "fmax" + Tab fixes itself into "fMax"). A single match completes
+  // (and fixes its case) immediately; several matches fill in as far as they agree and open
+  // an interactive session (see startCompletion) for arrow keys/Tab/click to pick among; no
+  // match leaves the input untouched so Tab falls back to its history-insert behavior below.
   function tryCompleteWord() {
     const word = wordBeforeCursor();
     if (!word) return false;
     const names = new Set([...STATIC_COMPLETION_NAMES, ...state.definitions.keys()]);
     const matches = [...names].filter((name) => name.length >= word.length && name.toLowerCase().startsWith(word.toLowerCase())).sort();
     if (matches.length === 0) return false;
-    const completion = matches.length === 1 ? matches[0] : longestCommonPrefix(matches);
-    if (completion.length <= word.length) return false;
     const pos = input.selectionStart;
-    input.value = input.value.slice(0, pos - word.length) + completion + input.value.slice(pos);
-    const newPos = pos - word.length + completion.length;
+    const start = pos - word.length;
+
+    if (matches.length === 1) {
+      if (matches[0] === word) return false; // already typed in full, with the right case
+      input.value = input.value.slice(0, start) + matches[0] + input.value.slice(pos);
+      const newPos = start + matches[0].length;
+      input.focus();
+      input.setSelectionRange(newPos, newPos);
+      onInputChanged();
+      return true;
+    }
+
+    const prefix = longestCommonPrefix(matches);
+    const filled = prefix.length > word.length ? prefix : word;
+    input.value = input.value.slice(0, start) + filled + input.value.slice(pos);
+    const newEnd = start + filled.length;
     input.focus();
-    input.setSelectionRange(newPos, newPos);
+    input.setSelectionRange(newEnd, newEnd);
     onInputChanged();
+    startCompletion(matches, start, newEnd);
     return true;
   }
 
@@ -517,6 +616,28 @@ export function mountApp(root) {
   // ---------- key handling ----------
 
   function handleKeyDown(e) {
+    // While a completion session is open, Up/Down/Tab move the highlighted candidate
+    // (wrapping around) and Enter confirms whichever one is currently filled into the input
+    // - handled first, before anything below (including the catch-all that would otherwise
+    // drop the list) can see these keys.
+    if (completionMatches.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab') {
+        e.preventDefault();
+        selectCompletion(completionIndex + (e.key === 'ArrowUp' ? -1 : 1));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        hideCompletions();
+        return;
+      }
+    }
+
+    // Any key other than Tab means the user has moved on from the candidates Tab last
+    // showed (typed further, submitted, browsed history, etc.) - drop the list so it never
+    // lingers stale. The Tab branch below manages its own show/hide.
+    if (e.key !== 'Tab') hideCompletions();
+
     if (e.key === 'Enter') {
       e.preventDefault();
       const step = currentStep();
@@ -586,22 +707,22 @@ export function mountApp(root) {
     }
 
     if (e.key === 'Tab') {
+      // Tab must never leave the input for the browser's default focus-change behavior,
+      // regardless of which branch below actually handles it (or whether none does).
+      e.preventDefault();
       // A step explicitly selected via Up/Down wins outright. Otherwise, try completing
       // the identifier under the caret first - only when that's a no-op (nothing typed, or
       // no name matches) does Tab fall back to inserting the last output, same as before.
-      if (!step && tryCompleteWord()) {
-        e.preventDefault();
-        return;
-      }
+      if (!step && tryCompleteWord()) return;
       const s = step ?? (state.history.length ? { idx: state.history.length - 1, part: 'output' } : null);
       if (!s) return;
-      e.preventDefault();
       insertStepAtCursor(s);
       state.navPos = -1;
       updateSelection();
     }
   }
   input.addEventListener('keydown', handleKeyDown);
+  input.addEventListener('blur', hideCompletions);
 
   // Alt+P/Alt+T toggle the plot and table panels from anywhere, including while the
   // expression input is focused. Esc also jumps back to the expression input from a
