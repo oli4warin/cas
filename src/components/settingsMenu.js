@@ -1,12 +1,14 @@
 import { h } from '../lib/dom.js';
 
 // Popover with the CAS session settings that affect every evaluation (calculator input
-// and plots alike, since they all share the one Giac session) - angle unit and whether
-// results are always numerically approximated instead of left exact.
-export function SettingsMenu({ onAngleModeChange, onApproxChange, onThemeChange, onShowTextChange }) {
+// and plots alike, since they all share the one Giac session) - angle unit, whether
+// results are always numerically approximated instead of left exact, and how much
+// auto-simplification Giac applies after each evaluation.
+export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplifyChange, onThemeChange, onShowTextChange }) {
   let open = false;
   let angleMode = 'RAD';
   let approx = false;
+  let autosimplify = 2;
   let showText = false;
   let theme = 'dark';
   let disabled = false;
@@ -17,6 +19,9 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onThemeChange,
   const radBtn = h('button', { type: 'button', onclick: () => onAngleModeChange('RAD') }, 'RAD');
   const degBtn = h('button', { type: 'button', onclick: () => onAngleModeChange('DEG') }, 'DEG');
   const approxInput = h('input', { type: 'checkbox', onchange: (e) => onApproxChange(e.target.checked) });
+  const autosimplifyBtns = [0, 1, 2].map((level) =>
+    h('button', { type: 'button', onclick: () => onAutosimplifyChange(level) }, String(level)),
+  );
   const showTextInput = h('input', { type: 'checkbox', onchange: (e) => onShowTextChange(e.target.checked) });
   const themeThumb = h('span', { class: 'theme-switch__thumb' }, '☾');
   const themeSwitch = h(
@@ -45,6 +50,12 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onThemeChange,
       { class: 'settings-menu__row settings-menu__row--checkbox' },
       h('span', { class: 'settings-menu__label' }, 'Approximate'),
       approxInput,
+    ),
+    h(
+      'div',
+      { class: 'settings-menu__row' },
+      h('span', { class: 'settings-menu__label', title: '0 = none, 1 = regroup, 2 = simplify' }, 'Autosimplify'),
+      h('div', { class: 'settings-menu__segmented' }, ...autosimplifyBtns),
     ),
     h(
       'label',
@@ -79,6 +90,10 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onThemeChange,
     degBtn.disabled = disabled;
     approxInput.checked = approx;
     approxInput.disabled = disabled;
+    autosimplifyBtns.forEach((btn, level) => {
+      btn.className = level === autosimplify ? 'settings-menu__seg--active' : '';
+      btn.disabled = disabled;
+    });
     showTextInput.checked = showText;
     themeSwitch.classList.toggle('theme-switch--light', theme === 'light');
     themeSwitch.setAttribute('aria-checked', theme === 'light');
@@ -98,6 +113,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onThemeChange,
   function update(state) {
     angleMode = state.angleMode;
     approx = state.approx;
+    autosimplify = state.autosimplify;
     showText = state.showText;
     theme = state.theme;
     disabled = state.disabled;

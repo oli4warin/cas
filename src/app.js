@@ -9,6 +9,7 @@ import {
   joinInputLines,
   normalizeMultilineInput,
   evaluateRaw as giacEvaluateRaw,
+  setAutosimplifyLevel as giacSetAutosimplifyLevel,
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
@@ -103,6 +104,7 @@ export function mountApp(root) {
     tableColumns: makeInitialColumns(),
     angleMode: 'RAD',
     approxMode: false,
+    autosimplify: 2, // 0=none, 1=regroup, 2=simplify - matches evaluate()'s own default in giac.js
     theme: getInitialTheme(),
     showText: getInitialShowText(),
   };
@@ -137,6 +139,7 @@ export function mountApp(root) {
   const settingsMenu = SettingsMenu({
     onAngleModeChange: handleAngleModeChange,
     onApproxChange: handleApproxModeChange,
+    onAutosimplifyChange: handleAutosimplifyChange,
     onThemeChange: handleThemeChange,
     onShowTextChange: handleShowTextChange,
   });
@@ -277,7 +280,7 @@ export function mountApp(root) {
     stopBtn.style.display = state.busy ? '' : 'none';
 
     functionsMenu.setDisabled(!engineReady);
-    settingsMenu.update({ angleMode: state.angleMode, approx: state.approxMode, showText: state.showText, theme: state.theme, disabled: !engineReady || state.busy });
+    settingsMenu.update({ angleMode: state.angleMode, approx: state.approxMode, autosimplify: state.autosimplify, showText: state.showText, theme: state.theme, disabled: !engineReady || state.busy });
 
     for (const btn of toolbar.children) btn.disabled = !engineReady;
   }
@@ -850,6 +853,12 @@ export function mountApp(root) {
     renderStatus();
   }
 
+  function handleAutosimplifyChange(level) {
+    state.autosimplify = level;
+    giacSetAutosimplifyLevel(level);
+    renderStatus();
+  }
+
   function handleThemeChange(next) {
     state.theme = next;
     document.documentElement.dataset.theme = state.theme;
@@ -1007,6 +1016,7 @@ export function mountApp(root) {
       // (radian, exact) can never silently diverge from what the UI shows.
       giacEvaluateRaw(state.angleMode === 'DEG' ? 'angle_radian(0)' : 'angle_radian(1)');
       giacEvaluateRaw(state.approxMode ? 'approx_mode(1)' : 'approx_mode(0)');
+      giacSetAutosimplifyLevel(state.autosimplify);
       input.focus();
 
       // Answers eval requests from any window this session pops the plot panel out into

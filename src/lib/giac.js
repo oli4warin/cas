@@ -698,6 +698,33 @@ export function evaluateRaw(expr) {
   return rawEvalAsync(expr);
 }
 
+// Giac's own autosimplify() flag (0=none, 1=regroup, 2=simplify) only governs what a real
+// Xcas session auto-applies to a line's result inside its own command loop - it does
+// nothing for a bare caseval() call like this app makes, so evaluate() below has to
+// replicate it itself by re-running the result through regroup()/simplify() when the level
+// is above 0 (see applyAutosimplify). This module-level level is what that re-run reads;
+// the engine-side flag is still set too, for any print statement inside multi-line input.
+let autosimplifyLevel = 2;
+
+export function setAutosimplifyLevel(level) {
+  autosimplifyLevel = level;
+  return rawEvalAsync(`autosimplify(${level})`);
+}
+
+// Re-simplifies a final result per the current autosimplify level. Only ever applied to
+// the generic fallback branch of evaluate() (see there) - not to solve()/desolve()'s own
+// specially-formatted output, which this would otherwise reshape (e.g. solve()'s "[-2,2]"
+// list becomes the set "{-2,2}" under regroup/simplify, breaking the "x1=-2, x2=2" tuple
+// labeling). Level 2 is a real trade-off, not a bug: simplify() also undoes an explicit
+// factor() call's result back into expanded form, exactly as autosimplify(2) does in a real
+// Xcas session - level 1 (regroup) still collects like terms (x+x -> 2*x) without that.
+async function applyAutosimplify(out) {
+  if (autosimplifyLevel === 0) return out;
+  const wrapped = autosimplifyLevel === 2 ? `simplify(${out})` : `regroup(${out})`;
+  const result = stripTrailingSemicolon(await rawEvalAsync(wrapped));
+  return result.startsWith('GIAC_ERROR') ? out : result;
+}
+
 function stripQuotes(s) {
   if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') {
     return s.slice(1, -1);
@@ -942,8 +969,9 @@ export async function evaluate(expr, knownConstants) {
     return { raw: desolved.raw, isError: false, text: desolved.text, latex: desolved.latex, isGraphics: false };
   }
 
-  const latexOut = await fetchLatex(out);
-  return { raw: out, isError: false, text: out, latex: latexOut, isGraphics: false };
+  const simplifiedOut = await applyAutosimplify(out);
+  const latexOut = await fetchLatex(simplifiedOut);
+  return { raw: simplifiedOut, isError: false, text: simplifiedOut, latex: latexOut, isGraphics: false };
 }
 
 function bigGcd(a, b) {
