@@ -1,7 +1,15 @@
 import { h, clear } from '../lib/dom.js';
 
-function isDefaultLowerBound(value) {
-  return /^-\s*infinity$/i.test(value) || /^-\s*inf$/i.test(value);
+const NEG_INFINITY_RE = /^-\s*infinity$/i;
+const NEG_INF_RE = /^-\s*inf$/i;
+const isNegInfinity = (s) => NEG_INFINITY_RE.test(s) || NEG_INF_RE.test(s);
+
+// True when `value` is still at the field's own default (accepting "-inf" as well as
+// "-infinity" for a -infinity default, since either spelling means the same thing to Giac -
+// see the two-bound-form fallback below) - used to decide whether the lower bound was left
+// untouched rather than deliberately set back to the same number as the default.
+function isDefaultLowerBound(value, defaultValue) {
+  return isNegInfinity(defaultValue) ? isNegInfinity(value) : value === defaultValue;
 }
 
 // Modal opened when the input holds nothing but a bare distribution command name (see
@@ -37,7 +45,7 @@ export function DistributionMenu({ onSubmit, onCancel }) {
     clear(fieldsWrap);
     fields = config.params.map((p) => ({ key: p.key, input: field(p.label, p.default != null ? { value: p.default } : undefined) }));
     if (config.kind === 'cdf') {
-      fields.push({ key: '__lower', input: field('Lower bound', { value: '-infinity' }) });
+      fields.push({ key: '__lower', input: field('Lower bound', { value: config.lowerDefault }) });
       fields.push({ key: '__upper', input: field('Upper bound') });
     } else {
       fields.push({ key: '__prob', input: field('Probability (p)') });
@@ -82,7 +90,7 @@ export function DistributionMenu({ onSubmit, onCancel }) {
       // outright wrong answers for several others (e.g. weibull_cdf(..., -infinity, x) = 1).
       // The single-bound form (<cmd>(params, upper)) is exactly P(X<=upper) and always
       // evaluates correctly, so fall back to it when the lower bound is left at its default.
-      if (isDefaultLowerBound(values.__lower)) args.push(values.__upper);
+      if (isDefaultLowerBound(values.__lower, current.lowerDefault)) args.push(values.__upper);
       else args.push(values.__lower, values.__upper);
     } else {
       args.push(values.__prob);

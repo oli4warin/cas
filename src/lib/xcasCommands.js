@@ -166,3 +166,18 @@ export const XCAS_COMMANDS = {
   piecewise: 'piecewise-defined expression',
   when: 'conditional expression',
 };
+
+// Alternate, calculator-familiar spellings that evaluate identically to a command above (see
+// normalizeAliasCommands in giac.js, which rewrites any of these to their canonical name
+// before an expression reaches the engine) but are deliberately kept out of XCAS_COMMANDS so
+// they don't clutter tab completion with near-duplicate entries - only the canonical spelling
+// is offered there. Also consulted by giacToLatex.js so a bare alias typed before its "("
+// still renders as an operator name (see operatorLabel) rather than as a subscripted variable,
+// and by findDistributionMenu (distributionParams.js) so a bare alias still opens that
+// command's parameter menu the same way its canonical name does.
+export const XCAS_COMMAND_ALIASES = {
+  normcdf: 'normald_cdf',
+  normalcdf: 'normald_cdf',
+  normal_cdf: 'normald_cdf',
+  binomcdf: 'binomial_cdf',
+};

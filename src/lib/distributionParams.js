@@ -3,6 +3,9 @@
 // A _cdf call is built as <family>_cdf(<params...>, lower, upper) - the two-bound form, which
 // Giac also accepts as a plain P(X<=upper) when lower is -infinity, so that's the default an
 // empty "lower bound" field falls back to. A _icdf call is built as <family>_icdf(<params...>, p).
+
+import { XCAS_COMMAND_ALIASES } from './xcasCommands.js';
+
 const FAMILY_PARAMS = {
   binomial: [
     { key: 'n', label: 'Number of trials (n)' },
@@ -47,18 +50,30 @@ const FAMILY_PARAMS = {
   ],
 };
 
+// Overrides the "Lower bound" field's default value (see distributionMenu.js) for a _cdf
+// menu whose family isn't supported down to -infinity - binomial(n,p) has no mass below 0,
+// so a lower bound of -infinity, while numerically harmless (see isDefaultLowerBound there),
+// is a confusing thing to show as the default.
+const CDF_LOWER_DEFAULTS = {
+  binomial: '0',
+};
+
 // Keyed by the exact command name (matches xcasCommands.js casing) so DISTRIBUTION_MENUS can
 // double as the canonical-casing source for findDistributionMenu below.
 export const DISTRIBUTION_MENUS = {};
 for (const [family, params] of Object.entries(FAMILY_PARAMS)) {
-  DISTRIBUTION_MENUS[`${family}_cdf`] = { kind: 'cdf', params };
+  DISTRIBUTION_MENUS[`${family}_cdf`] = { kind: 'cdf', params, lowerDefault: CDF_LOWER_DEFAULTS[family] ?? '-infinity' };
   DISTRIBUTION_MENUS[`${family}_icdf`] = { kind: 'icdf', params };
 }
 
 // Case-insensitive lookup (the input field doesn't enforce casing) - returns the config plus
 // its canonical command name, or null when `name` isn't one of the configured commands.
+// `name` may also be one of XCAS_COMMAND_ALIASES's calculator-familiar spellings (e.g.
+// "normcdf", "binomcdf") - those resolve to their canonical command first, so a bare alias
+// opens the same parameter menu its canonical name would.
 export function findDistributionMenu(name) {
   if (!name) return null;
-  const key = Object.keys(DISTRIBUTION_MENUS).find((k) => k.toLowerCase() === name.toLowerCase());
+  const canonical = XCAS_COMMAND_ALIASES[name.toLowerCase()] || name;
+  const key = Object.keys(DISTRIBUTION_MENUS).find((k) => k.toLowerCase() === canonical.toLowerCase());
   return key ? { name: key, ...DISTRIBUTION_MENUS[key] } : null;
 }

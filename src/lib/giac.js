@@ -4,6 +4,7 @@
 // timeout here just terminates and respawns the worker to recover).
 
 import { giacToLatex } from './giacToLatex.js';
+import { XCAS_COMMAND_ALIASES } from './xcasCommands.js';
 
 const EVAL_TIMEOUT_MS = 15000;
 
@@ -196,6 +197,17 @@ const NCR_ALIAS_RE = /\bncr(?=\s*\()/gi;
 
 export function normalizeNcrAlias(expr) {
   return expr.replace(NCR_ALIAS_RE, 'comb');
+}
+
+// Rewrites any calculator-familiar alias from XCAS_COMMAND_ALIASES (see xcasCommands.js for
+// why those are kept out of XCAS_COMMANDS/tab completion) to its canonical Giac name,
+// case-insensitively, before the expression reaches the engine - same treatment as
+// NCR_ALIAS_RE above, generalized to a table since there's now more than one such alias.
+const ALIAS_NAMES_PATTERN = Object.keys(XCAS_COMMAND_ALIASES).join('|');
+const COMMAND_ALIAS_RE = new RegExp(`\\b(${ALIAS_NAMES_PATTERN})(?=\\s*\\()`, 'gi');
+
+export function normalizeAliasCommands(expr) {
+  return expr.replace(COMMAND_ALIAS_RE, (m) => XCAS_COMMAND_ALIASES[m.toLowerCase()]);
 }
 
 function findMatchingBracket(s, openIdx) {
@@ -681,7 +693,7 @@ async function fetchLatex(out) {
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
 export async function evaluate(expr, knownConstants) {
-  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(wrapBareEquation(expr, knownConstants))));
+  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, knownConstants)))));
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
   if (out.startsWith('GIAC_ERROR')) {
@@ -856,7 +868,7 @@ const EXACT_DECIMAL_TAIL_RE = /^(.+)=(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|[+-]?infinit
 //   terminate (1/3 -> 0.3333...) or isn't rational to begin with (sqrt(2), pi, ...).
 //   1/2 -> 0.5 is exact, so it gets no marker.
 export async function evaluateApprox(expr, knownConstants) {
-  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(wrapBareEquation(expr, knownConstants))));
+  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, knownConstants)))));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown

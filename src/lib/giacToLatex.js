@@ -8,7 +8,7 @@
 // path needs a fully-parseable expression and a worker round trip, both wrong fits for a
 // per-keystroke preview.
 
-import { XCAS_COMMANDS } from './xcasCommands.js';
+import { XCAS_COMMANDS, XCAS_COMMAND_ALIASES } from './xcasCommands.js';
 
 const UNARY_PREC = 7; // same as '^', so "-x^2" parses as -(x^2), matching math convention.
 
@@ -309,12 +309,12 @@ function render(node) {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
       if (GREEK[lname]) return GREEK[lname] + primes;
-      // A known command name typed without its "(" yet (e.g. mid-typing "normal_cdf") is
-      // still a function reference, not a subscripted variable - render it the same way a
-      // finished call would (see renderCall's fallback below) so the \operatorname{} styling
-      // and underscore-escaping apply as soon as the name is recognized, not only once "("
-      // appears.
-      if (XCAS_COMMANDS[lname]) return operatorLabel(node.name) + primes;
+      // A known command name (or one of its aliases, e.g. "normal_cdf" for "normald_cdf" -
+      // see XCAS_COMMAND_ALIASES) typed without its "(" yet is still a function reference,
+      // not a subscripted variable - render it the same way a finished call would (see
+      // renderCall's fallback below) so the \operatorname{} styling and underscore-escaping
+      // apply as soon as the name is recognized, not only once "(" appears.
+      if (XCAS_COMMANDS[lname] || XCAS_COMMAND_ALIASES[lname]) return operatorLabel(node.name) + primes;
       return renderVarName(node.name) + primes;
     }
     case 'text':
