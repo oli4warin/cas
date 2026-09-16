@@ -431,6 +431,16 @@ function parseSolveVarList(sentExpr) {
 // actually distinguishes them. Returns null for any shape that doesn't match - no solutions
 // ("[]"), or a result that isn't actually a plain list of `varNames`-length tuples - so the
 // caller falls back to showing Giac's own output untouched.
+//
+// Also returns `reinsertRaw`: a copy-friendly form of the solution(s), left undefined (meaning:
+// caller keeps Giac's own raw list) whenever there's nothing worth simplifying - a system
+// (more than one variable) with more than one solution, where the double nesting is the only
+// thing that says which value belongs to which variable in which solution. Otherwise:
+// - exactly one solution: unwrapped all the way down to its bare value for one equation
+//   ("list[[6]]" -> "6"), or down to just its own value list for a system ("list[[6,5]]" ->
+//   "[6,5]", since that inner list is still needed to tell the variables apart).
+// - one equation, several solutions: flattened out of their needless one-per-solution
+//   wrapping into a single flat list ("list[[-sqrt(2)],[sqrt(2)]]" -> "list[-sqrt(2),sqrt(2)]").
 function parseSolveSolutions(raw, varNames) {
   let inner;
   if (raw.startsWith('list[') && raw.endsWith(']')) inner = raw.slice(5, -1);
@@ -447,10 +457,19 @@ function parseSolveSolutions(raw, varNames) {
     tuples.push(values);
   }
 
-  return tuples.map((values, idx) => {
+  const clauses = tuples.map((values, idx) => {
     const suffix = tuples.length > 1 ? `_${idx + 1}` : '';
     return varNames.map((name, i) => `${name}${suffix}=${values[i]}`).join(' and ');
   });
+
+  let reinsertRaw;
+  if (tuples.length === 1) {
+    reinsertRaw = tuples[0].length === 1 ? tuples[0][0] : `[${tuples[0].join(',')}]`;
+  } else if (varNames.length === 1) {
+    reinsertRaw = `list[${tuples.map((values) => values[0]).join(',')}]`;
+  }
+
+  return { clauses, reinsertRaw };
 }
 
 // Stacks each already-labeled solution clause (see parseSolveSolutions) on its own row via
@@ -468,11 +487,13 @@ function renderGatheredLatex(clauses) {
 // that need it. Returns null (meaning: fall back to Giac's own rendering) whenever `varNames`
 // is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions).
 function formatSolveResult(raw, varNames) {
-  const clauses = varNames && parseSolveSolutions(raw, varNames);
-  if (!clauses) return null;
+  const parsed = varNames && parseSolveSolutions(raw, varNames);
+  if (!parsed) return null;
+  const { clauses, reinsertRaw } = parsed;
   return {
     text: clauses.join('\n'),
     latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
+    raw: reinsertRaw !== undefined ? reinsertRaw : raw,
   };
 }
 
@@ -514,7 +535,8 @@ async function fetchLatex(out) {
 
 // Evaluate one line of Xcas input. Returns a promise for:
 //   { raw, isError, text, latex, isGraphics }
-// - raw: the untouched string Giac returned
+// - raw: the string Giac returned, untouched - except a single-solution solve() result,
+//   which is unwrapped out of Giac's outer solution-list (see parseSolveSolutions)
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
 export async function evaluate(expr, knownConstants) {
@@ -566,11 +588,13 @@ export async function evaluate(expr, knownConstants) {
   // solve()'s own "(1 4)"-style tuple doesn't say which value is which variable - relabel it
   // to "x=1 and y=4" (see parseSolveSolutions), one solution per line, whenever `sentExpr`
   // was a solve() call with an explicit variable list (wrapBareEquation's path above, or the
-  // same thing typed by hand). `raw` is left untouched either way, so copying the result
-  // (see historyEntry.js) still copies exactly what Giac returned.
+  // same thing typed by hand). With more than one solution `raw` is left untouched, so
+  // copying the result (see historyEntry.js) still copies exactly what Giac returned; with
+  // exactly one solution `raw` is replaced by that solution's own value(s), unwrapped out of
+  // Giac's outer solution-list (see parseSolveSolutions's `reinsertRaw`).
   const solved = formatSolveResult(out, parseSolveVarList(sentExpr));
   if (solved) {
-    return { raw: out, isError: false, text: solved.text, latex: solved.latex, isGraphics: false };
+    return { raw: solved.raw, isError: false, text: solved.text, latex: solved.latex, isGraphics: false };
   }
 
   const latexOut = await fetchLatex(out);
@@ -705,7 +729,7 @@ export async function evaluateApprox(expr, knownConstants) {
   }
 
   // solve()'s own tuple form doesn't say which value is which variable - see the matching
-  // comment in evaluate() above. `raw` stays whatever Giac returned either way.
+  // comment in evaluate() above (same single-solution `raw` unwrapping applies below).
   const varNames = parseSolveVarList(normalized);
 
   // Anything else (an equation, list, matrix, complex number, ...) doesn't get Giac's
@@ -715,7 +739,7 @@ export async function evaluateApprox(expr, knownConstants) {
     // evalf() failed for some reason - show the exact form rather than an error.
     const solvedExact = formatSolveResult(out, varNames);
     if (solvedExact) {
-      return { raw: out, isError: false, text: solvedExact.text, latex: solvedExact.latex, isGraphics: false };
+      return { raw: solvedExact.raw, isError: false, text: solvedExact.text, latex: solvedExact.latex, isGraphics: false };
     }
     const latexOut = await fetchLatex(out);
     return { raw: out, isError: false, text: out, latex: latexOut, isGraphics: false };
@@ -728,7 +752,7 @@ export async function evaluateApprox(expr, knownConstants) {
 
   const solvedApprox = formatSolveResult(approxOut, varNames);
   if (solvedApprox) {
-    return { raw: approxOut, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false };
+    return { raw: solvedApprox.raw, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false };
   }
 
   const latexOut = await fetchLatex(approxOut);
