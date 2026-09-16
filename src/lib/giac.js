@@ -270,17 +270,26 @@ export function normalizeNspireMatrices(expr) {
   return out;
 }
 
-// True iff `s` has a "bare" `=` outside any (), [], {} nesting - i.e. one that means
-// "equation", not `:=` (assignment), `==`/`!=`/`<=`/`>=` (comparison), or an `=` already
-// sitting inside a call's arguments (e.g. `plot(x=1,...)`, or an equation already handed to
-// `solve(...)` by the user themselves).
-function hasTopLevelBareEquals(s) {
+// True iff `s` has a top-level "bare" relation outside any (), [], {} nesting - either a
+// plain `=` meaning "equation" (not `:=` assignment, `==`/`!=` comparison, or an `=` already
+// sitting inside a call's arguments, e.g. `plot(x=1,...)`, or an equation already handed to
+// `solve(...)` by the user themselves), an ordering relation (`<`, `<=`, `>`, `>=`) meaning
+// "inequality", or a top-level `and`/`or` joining several such relations (Giac's own way of
+// writing a system of inequalities on one variable, e.g. solve()'s own raw answer to
+// "x>2 and x<5" comes back as "(x>2) and (x<5)" - each individual `<`/`>` there sits inside
+// its own parens, at depth > 0, so only the `and`/`or` between them is visible at depth 0;
+// see parseSolveSolutions below, which relies on this to recognize the whole thing as already
+// a condition rather than a plain value). Any of these shapes is something wrapBareEquation
+// below treats as "solve this".
+function hasTopLevelRelation(s) {
   let depth = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === '(' || c === '[' || c === '{') depth++;
     else if (c === ')' || c === ']' || c === '}') depth--;
-    else if (c === '=' && depth === 0) {
+    else if (depth === 0 && (c === '<' || c === '>')) {
+      return true;
+    } else if (c === '=' && depth === 0) {
       const prev = s[i - 1];
       const next = s[i + 1];
       if (prev !== '=' && prev !== '!' && prev !== '<' && prev !== '>' && prev !== ':' && next !== '=') {
@@ -288,7 +297,7 @@ function hasTopLevelBareEquals(s) {
       }
     }
   }
-  return false;
+  return splitTopLevelKeyword(s, 'and').length > 1 || splitTopLevelKeyword(s, 'or').length > 1;
 }
 
 // Splits `s` on a keyword (e.g. "and") only where the match is a whole word (not part of a
@@ -396,10 +405,15 @@ function pickIndependentVar(funcNames) {
 // already wrapped in a call (including
 // `solve(...)`/`desolve(...)` themselves) has its "=" at depth > 0 and is left untouched.
 // `knownConstants` (names already assigned this session) are excluded from solve()'s appended
-// variable list - it's asked for only the genuinely free unknowns. The list is always given
-// explicitly, even for a single variable (Giac returns the exact same solutions either way -
-// just each one wrapped one list level deeper - see parseSolveVarList/parseSolveSolutions
-// below), so the result can always be relabeled with which variable each value belongs to.
+// variable list - it's asked for only the genuinely free unknowns. That variable is always
+// given explicitly (see parseSolveVarList/parseSolveSolutions below, so the result can always
+// be relabeled with which variable each value belongs to) - as a bracketed list for a system
+// of more than one variable, but deliberately *not* bracketed for a single variable, even
+// though Giac accepts "solve(eq,[x])" too and normally treats it the same as "solve(eq,x)":
+// for a bare inequality specifically, the bracketed form has been observed to make Giac fall
+// back to a numeric "Certificate of existence" result instead of solving it symbolically
+// (e.g. "x>2" wrapped as "solve(x>2,[x])" comes back wrong; "solve(x>2,x)" is correct) - so
+// the one-variable case always uses the plain, unbracketed form to avoid that.
 export function wrapBareEquation(expr, knownConstants = new Set()) {
   const s = expr.trim();
   if (!s) return expr;
@@ -412,7 +426,7 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
 
   if (body[0] === '[' && findMatchingBracket(body, 0) === body.length - 1) {
     const parts = splitTopLevel(body.slice(1, -1), ',');
-    if (parts.length > 0 && parts.every((p) => hasTopLevelBareEquals(p.trim()))) {
+    if (parts.length > 0 && parts.every((p) => hasTopLevelRelation(p.trim()))) {
       equationsText = body;
       equationParts = parts.map((p) => p.trim());
     }
@@ -420,13 +434,13 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
 
   if (equationsText == null) {
     const andParts = splitTopLevelKeyword(body, 'and');
-    if (andParts.length > 1 && andParts.every((p) => hasTopLevelBareEquals(p.trim()))) {
+    if (andParts.length > 1 && andParts.every((p) => hasTopLevelRelation(p.trim()))) {
       equationsText = body;
       equationParts = andParts.map((p) => p.trim());
     }
   }
 
-  if (equationsText == null && hasTopLevelBareEquals(body)) {
+  if (equationsText == null && hasTopLevelRelation(body)) {
     equationsText = body;
     equationParts = [body.trim()];
   }
@@ -448,7 +462,7 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
   }
 
   const freeVars = collectFreeVariables(equationsText, knownConstants);
-  const varsArg = freeVars.length > 0 ? `,[${freeVars.join(',')}]` : '';
+  const varsArg = freeVars.length > 1 ? `,[${freeVars.join(',')}]` : freeVars.length === 1 ? `,${freeVars[0]}` : '';
   const wrapped = `solve(${equationsText}${varsArg})`;
   return hasSemi ? `${wrapped};` : wrapped;
 }
@@ -512,6 +526,29 @@ function parseSolveVarList(sentExpr) {
   return vars.length === 1 || SYSTEM_CAPABLE_COMMANDS.has(name) ? vars : null;
 }
 
+// Strips as many layers of a fully-enclosing, matched outer "(...)" pair as `s` has - used
+// below (see normalizeSolutionValue) because Giac sometimes wraps a whole conjunction of
+// relations in its own redundant outer parens (e.g. "((x>5) and (x<10))" for
+// "solve(x>5 and x<10,x)"), on top of the parens each individual relation already carries.
+function stripRedundantOuterParens(s) {
+  while (s.length >= 2 && s[0] === '(' && s[s.length - 1] === ')' && findMatchingParen(s, 0) === s.length - 1) {
+    s = s.slice(1, -1);
+  }
+  return s;
+}
+
+// A solve() value that's really a relation (see hasTopLevelRelation) - a single inequality
+// or a conjunction/disjunction of several - can come wrapped in its own redundant outer
+// parens. Unwrapping first, only when doing so actually reveals a relation (never for a
+// plain value that legitimately starts and ends with its own parens), means both the
+// relation check and the value ultimately shown (see parseSolveSolutions below) drop that
+// outer wrapping - "(x>5) and (x<10)" rather than "x=((x>5) and (x<10))". Each individual
+// relation keeps its own parens; only the single redundant pair around the whole thing goes.
+function normalizeSolutionValue(value) {
+  const stripped = stripRedundantOuterParens(value);
+  return stripped !== value && hasTopLevelRelation(stripped) ? stripped : value;
+}
+
 // Turns a solve-like call's raw result - solve/csolve's own "list[[v1,v2],[v1,v2],...]" (each
 // inner list one solution, in the same order as `varNames`), or fsolve/zeros/czeros's flatter
 // "[v1,v2,...]" (always single-variable, so each element directly *is* one solution's value,
@@ -533,7 +570,15 @@ function parseSolveVarList(sentExpr) {
 //   "[6,5]", since that inner list is still needed to tell the variables apart).
 // - one equation, several solutions: flattened out of their needless one-per-solution
 //   wrapping into a single flat list ("list[[-sqrt(2)],[sqrt(2)]]" -> "list[-sqrt(2),sqrt(2)]").
-function parseSolveSolutions(raw, varNames) {
+// Parses solve/csolve's own "list[[v1,v2],[v1,v2],...]" (each inner list one solution, in the
+// same order as `varNames`), or fsolve/zeros/czeros's flatter "[v1,v2,...]" (always
+// single-variable, so each element directly *is* one solution's value, not wrapped in its own
+// one-element tuple), into an array of tuples - one array of `varNames.length` values per
+// solution. Returns null for anything that isn't actually shaped like one of those (not
+// bracket-wrapped at all, no solutions ("[]"), or a tuple whose length doesn't match
+// `varNames`) - shared by parseSolveSolutions (the exact/"=" path) and
+// formatSolveResultApprox (evaluateApprox()'s "≈" path) below.
+function parseSolveTuples(raw, varNames) {
   let inner;
   if (raw.startsWith('list[') && raw.endsWith(']')) inner = raw.slice(5, -1);
   else if (raw.startsWith('[') && raw.endsWith(']')) inner = raw.slice(1, -1);
@@ -544,19 +589,35 @@ function parseSolveSolutions(raw, varNames) {
   for (const sol of splitTopLevel(inner, ',')) {
     const t = sol.trim();
     if (t.startsWith('[') && t.endsWith(']') && findMatchingBracket(t, 0) === t.length - 1) {
-      const values = splitTopLevel(t.slice(1, -1), ',').map((v) => v.trim());
+      const values = splitTopLevel(t.slice(1, -1), ',').map((v) => normalizeSolutionValue(v.trim()));
       if (values.length !== varNames.length) return null;
       tuples.push(values);
     } else if (varNames.length === 1) {
-      tuples.push([t]);
+      tuples.push([normalizeSolutionValue(t)]);
     } else {
       return null;
     }
   }
+  return tuples;
+}
 
+function parseSolveSolutions(raw, varNames) {
+  const tuples = parseSolveTuples(raw, varNames);
+  if (!tuples) return null;
+
+  // solve() hands back an inequality solution (e.g. "x>6") as just another list element,
+  // exactly like it would a plain value - labeling it the same way a plain value gets
+  // labeled would double up on the variable ("x=x>6"). A value that's already its own
+  // top-level relation is shown as-is instead, dropping the "name[_idx]=" prefix entirely
+  // (not just the "name=" part) since the value already says which variable it constrains.
   const clauses = tuples.map((values, idx) => {
     const suffix = tuples.length > 1 ? `_${idx + 1}` : '';
-    return varNames.map((name, i) => `${name}${suffix}=${values[i]}`).join(' and ');
+    return varNames
+      .map((name, i) => {
+        const value = values[i];
+        return hasTopLevelRelation(value) ? value : `${name}${suffix}=${value}`;
+      })
+      .join(' and ');
   });
 
   let reinsertRaw;
@@ -948,6 +1009,83 @@ function terminatingDecimalString(num, den) {
   return `${sign}${intPart}.${fracPart}`;
 }
 
+// The literal separator giacToLatex's own parser inserts between two "and"-joined
+// sub-expressions (see its LOGICAL_WORDS handling) - reused here so a solution clause built
+// by hand out of separately-rendered fragments (see formatSolveResultApprox below, which
+// can't just hand a mixed "=""≈" string to giacToLatex the way formatSolveResult does, since
+// "≈" isn't valid Giac syntax) still joins the same way a clause giacToLatex parsed as one
+// piece would.
+const AND_LATEX_JOINER = '\\ \\text{and}\\ ';
+
+// Builds one solve() value's display fragment for evaluateApprox() - mirrors the same
+// exact-vs-approximate distinction evaluate()/evaluateApprox() already make for a single bare
+// value (see EXACT_DECIMAL_TAIL_RE/exactNumberResult above): "=" only when the decimal shown
+// is exactly right (an integer, or a fraction whose decimal expansion terminates and matches
+// what evalf() gave), "≈" otherwise (a non-terminating fraction, an irrational value like
+// sqrt(2), or anything else Giac only evaluated numerically). `exactValue` and `approxValue`
+// are the same solution slot read out of solve()'s exact and evalf()'d results respectively
+// (see formatSolveResultApprox). A relation (see hasTopLevelRelation) is shown using its own
+// evalf()'d form as-is, same as formatSolveResult's exact path does for its un-evalf'd one -
+// no "=" or "≈" marker, since the value already says which variable it constrains.
+function formatSolveValueFragment(name, exactValue, approxValue) {
+  if (hasTopLevelRelation(exactValue)) {
+    return { value: approxValue, text: approxValue, latex: giacToLatex(approxValue) };
+  }
+
+  const rational = parseExactRational(exactValue);
+  const exactDecimal = rational && rational.den !== 1n ? terminatingDecimalString(rational.num, rational.den) : null;
+  if (rational && (rational.den === 1n || (exactDecimal && sameNumericValue(exactDecimal, approxValue)))) {
+    const value = rational.den === 1n ? exactValue : exactDecimal;
+    return { value, text: `${name}=${value}`, latex: giacToLatex(`${name}=${value}`) };
+  }
+
+  const nameLatex = giacToLatex(name);
+  const valueLatex = giacToLatex(approxValue);
+  return {
+    value: approxValue,
+    text: `${name} ≈ ${approxValue}`,
+    latex: nameLatex != null && valueLatex != null ? `${nameLatex} \\approx ${valueLatex}` : null,
+  };
+}
+
+// evaluateApprox()'s counterpart to formatSolveResult: `exactRaw` (solve()'s un-evalf'd
+// result, e.g. "list[32/3]") and `approxRaw` (the same result after evalf(), e.g.
+// "list[10.6666666667]") are parsed in lockstep (see parseSolveTuples) so each solution value
+// can be labeled "=" or "≈" on its own (see formatSolveValueFragment) rather than always "="
+// the way the exact path labels every value. Returns null - meaning: caller falls back to
+// formatSolveResult(approxRaw, varNames), the plain "=" labeling - whenever `varNames` is
+// null or the two raw strings aren't shaped alike enough to pair up value-for-value.
+function formatSolveResultApprox(exactRaw, approxRaw, varNames) {
+  if (!varNames) return null;
+  const exactTuples = parseSolveTuples(exactRaw, varNames);
+  const approxTuples = parseSolveTuples(approxRaw, varNames);
+  if (!exactTuples || !approxTuples || exactTuples.length !== approxTuples.length) return null;
+
+  const textClauses = [];
+  const latexClauses = [];
+  const reinsertTuples = [];
+  for (let i = 0; i < exactTuples.length; i++) {
+    const suffix = exactTuples.length > 1 ? `_${i + 1}` : '';
+    const fragments = varNames.map((name, j) => formatSolveValueFragment(`${name}${suffix}`, exactTuples[i][j], approxTuples[i][j]));
+    textClauses.push(fragments.map((f) => f.text).join(' and '));
+    latexClauses.push(fragments.every((f) => f.latex != null) ? fragments.map((f) => f.latex).join(AND_LATEX_JOINER) : null);
+    reinsertTuples.push(fragments.map((f) => f.value));
+  }
+
+  let reinsertRaw;
+  if (reinsertTuples.length === 1) {
+    reinsertRaw = reinsertTuples[0].length === 1 ? reinsertTuples[0][0] : `[${reinsertTuples[0].join(',')}]`;
+  } else if (varNames.length === 1) {
+    reinsertRaw = `list[${reinsertTuples.map((values) => values[0]).join(',')}]`;
+  }
+
+  return {
+    text: textClauses.join('\n'),
+    latex: latexClauses.length === 1 ? latexClauses[0] : latexClauses.every(Boolean) ? `\\begin{gathered}${latexClauses.join('\\\\')}\\end{gathered}` : null,
+    raw: reinsertRaw !== undefined ? reinsertRaw : approxRaw,
+  };
+}
+
 // Giac's own caseval() auto-appends "=<preview>" to a non-integer exact numeric result
 // (rational or irrational alike) - e.g. "1/3" evaluates to "1/3=0.333333333333" and "sqrt(2)"
 // to "sqrt(2)=1.41421356237" - AND, it turns out, to a plain integer once it's too big to
@@ -1059,7 +1197,7 @@ export async function evaluateApprox(expr, knownConstants) {
     return { raw: approxOut, isError: false, text: approxUnquoted, latex: null, isGraphics: false };
   }
 
-  const solvedApprox = formatSolveResult(approxOut, varNames);
+  const solvedApprox = formatSolveResultApprox(out, approxOut, varNames) || formatSolveResult(approxOut, varNames);
   if (solvedApprox) {
     return { raw: solvedApprox.raw, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false };
   }
