@@ -35,7 +35,7 @@ export function DistributionMenu({ onSubmit, onCancel }) {
 
   function buildFields(config) {
     clear(fieldsWrap);
-    fields = config.params.map((p) => ({ key: p.key, input: field(p.label) }));
+    fields = config.params.map((p) => ({ key: p.key, input: field(p.label, p.default != null ? { value: p.default } : undefined) }));
     if (config.kind === 'cdf') {
       fields.push({ key: '__lower', input: field('Lower bound', { value: '-infinity' }) });
       fields.push({ key: '__upper', input: field('Upper bound') });
