@@ -22,7 +22,9 @@ import { TablePanel } from './components/tablePanel.js';
 import { Credits } from './components/credits.js';
 import { SettingsMenu } from './components/settingsMenu.js';
 import { FunctionsMenu } from './components/functionsMenu.js';
+import { DistributionMenu } from './components/distributionMenu.js';
 import { XCAS_COMMANDS } from './lib/xcasCommands.js';
+import { findDistributionMenu } from './lib/distributionParams.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -124,6 +126,14 @@ export function mountApp(root) {
   const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, 'Plot');
   const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, 'Table');
   const functionsMenu = FunctionsMenu({ onInsert: insertSnippet });
+  const distributionMenu = DistributionMenu({
+    onSubmit: (expr) => {
+      input.value = expr;
+      submit({ force: true });
+      input.focus();
+    },
+    onCancel: () => input.focus(),
+  });
   const settingsMenu = SettingsMenu({
     onAngleModeChange: handleAngleModeChange,
     onApproxChange: handleApproxModeChange,
@@ -231,6 +241,7 @@ export function mountApp(root) {
 
   clear(root);
   root.appendChild(layout);
+  root.appendChild(distributionMenu.root);
 
   // ---------- rendering helpers ----------
 
@@ -721,6 +732,15 @@ export function mountApp(root) {
       // submit's `force` param) so the everyday key never second-guesses what was typed.
       // Ctrl+Enter (or Cmd+Enter) evaluates numerically instead of exactly.
       if (e.shiftKey) return;
+      // A bare distribution command name (no parentheses yet - see findDistributionMenu)
+      // opens a parameter menu instead of being submitted as-is, since evaluating it
+      // without arguments would just error.
+      const menu = findDistributionMenu(input.value.trim());
+      if (menu) {
+        e.preventDefault();
+        distributionMenu.open(menu);
+        return;
+      }
       e.preventDefault();
       submit({ force: true, approx: e.ctrlKey || e.metaKey });
       return;
