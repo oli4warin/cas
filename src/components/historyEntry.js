@@ -60,8 +60,19 @@ export function HistoryEntry({ entry, index, onSelect, onDelete }) {
 
   // Same best-effort syntax-only converter as the live input preview (see app.js) - it
   // never touches the engine, so a submitted input renders identically to how it looked
-  // while being typed.
-  const inputLatex = giacToLatex(entry.input) || '';
+  // while being typed. A system typed one equation per line (see joinInputLines/app.js -
+  // entry.input keeps the actual line breaks, unlike the " and "-joined form sent to the
+  // engine) renders each line's math separately and stacks them in a `gathered` block,
+  // rather than joining lines into running text - if any single line fails to convert, the
+  // whole thing falls back to plain text together, same as a single line already does.
+  const inputLines = entry.input.split('\n');
+  const inputLatex =
+    inputLines.length === 1
+      ? giacToLatex(entry.input) || ''
+      : (() => {
+          const rendered = inputLines.map((line) => giacToLatex(line));
+          return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : '';
+        })();
   if (inputLatex) {
     inputMath.textContent = '\\[' + inputLatex + '\\]';
     inputMath.style.display = '';

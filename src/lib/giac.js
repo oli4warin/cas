@@ -3,6 +3,8 @@
 // synchronous computation, and isolating it means the page never freezes for it - a
 // timeout here just terminates and respawns the worker to recover).
 
+import { giacToLatex } from './giacToLatex.js';
+
 const EVAL_TIMEOUT_MS = 15000;
 
 // Resolved relative to this module's own file, so it works regardless of what path the
@@ -256,6 +258,224 @@ export function normalizeNspireMatrices(expr) {
   return out;
 }
 
+// True iff `s` has a "bare" `=` outside any (), [], {} nesting - i.e. one that means
+// "equation", not `:=` (assignment), `==`/`!=`/`<=`/`>=` (comparison), or an `=` already
+// sitting inside a call's arguments (e.g. `plot(x=1,...)`, or an equation already handed to
+// `solve(...)` by the user themselves).
+function hasTopLevelBareEquals(s) {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === '=' && depth === 0) {
+      const prev = s[i - 1];
+      const next = s[i + 1];
+      if (prev !== '=' && prev !== '!' && prev !== '<' && prev !== '>' && prev !== ':' && next !== '=') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Splits `s` on a keyword (e.g. "and") only where the match is a whole word (not part of a
+// longer identifier) sitting outside any ()/[]/{} nesting - mirrors splitTopLevel above, but
+// for a word separator like Xcas's `eq1 and eq2` (rather than a single punctuation char).
+function splitTopLevelKeyword(s, word) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (depth === 0 && s.startsWith(word, i)) {
+      const before = i === 0 ? '' : s[i - 1];
+      const after = s[i + word.length] ?? '';
+      if (!/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after)) {
+        parts.push(s.slice(start, i));
+        i += word.length;
+        start = i;
+        continue;
+      }
+    }
+    i++;
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
+// Xcas syntax words and constants that can appear bare in an equation but are never
+// themselves "the unknown" - `and`-joining equations for solve(), or names like `pi`/`i`
+// that already have a fixed meaning to Giac.
+const EQUATION_KEYWORDS = new Set(['and', 'or', 'not', 'xor', 'true', 'false']);
+const BUILTIN_CONSTANT_NAMES = new Set(['pi', 'e', 'i', 'inf', 'infinity', 'euler_gamma']);
+const FREE_VAR_IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
+
+// Collects the identifiers in `s` that stand for an unknown to solve for, in first-appearance
+// order: skips Xcas keywords, skips names followed by "(" (those are function calls, e.g.
+// `sin` in `sin(x)`, not variables), and skips anything in `knownConstants` - names the user
+// has already assigned this session (see state.definitions in app.js), since a variable
+// that's been given a value is a constant as far as the equation is concerned.
+function collectFreeVariables(s, knownConstants) {
+  const seen = new Set();
+  const result = [];
+  let m;
+  FREE_VAR_IDENT_RE.lastIndex = 0;
+  while ((m = FREE_VAR_IDENT_RE.exec(s))) {
+    const name = m[0];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    if (EQUATION_KEYWORDS.has(name) || BUILTIN_CONSTANT_NAMES.has(name) || knownConstants.has(name)) continue;
+    let j = m.index + name.length;
+    while (j < s.length && /\s/.test(s[j])) j++;
+    if (s[j] === '(') continue; // function name, not a variable
+    result.push(name);
+  }
+  return result;
+}
+
+// A line that's just one or more equations and no command at all - "x^2-3=0", or a system
+// as "x+y=5 and y-x=3" or "[x+y=5,y-x=3]" - almost always means "solve this", so wrap it the
+// way a user reaching for the `solve` button (see EXPRESSION_BUTTONS in app.js) would.
+// Anything already wrapped in a call (including `solve(...)` itself) has its "=" at depth > 0
+// and is left untouched. `knownConstants` (names already assigned this session) are excluded
+// from the appended variable list - solve() is asked for only the genuinely free unknowns.
+// The list is always given explicitly, even for a single variable (Giac returns the exact
+// same solutions either way - just each one wrapped one list level deeper - see
+// parseSolveVarList/parseSolveSolutions below), so the result can always be relabeled with
+// which variable each value belongs to.
+export function wrapBareEquation(expr, knownConstants = new Set()) {
+  const s = expr.trim();
+  if (!s) return expr;
+  const hasSemi = s.endsWith(';');
+  const body = hasSemi ? s.slice(0, -1) : s;
+  if (!body) return expr;
+
+  let equationsText = null;
+
+  if (body[0] === '[' && findMatchingBracket(body, 0) === body.length - 1) {
+    const parts = splitTopLevel(body.slice(1, -1), ',');
+    if (parts.length > 0 && parts.every((p) => hasTopLevelBareEquals(p.trim()))) {
+      equationsText = body;
+    }
+  }
+
+  if (equationsText == null) {
+    const andParts = splitTopLevelKeyword(body, 'and');
+    if (andParts.length > 1 && andParts.every((p) => hasTopLevelBareEquals(p.trim()))) {
+      equationsText = body;
+    }
+  }
+
+  if (equationsText == null && hasTopLevelBareEquals(body)) {
+    equationsText = body;
+  }
+
+  if (equationsText == null) return expr;
+
+  const freeVars = collectFreeVariables(equationsText, knownConstants);
+  const varsArg = freeVars.length > 0 ? `,[${freeVars.join(',')}]` : '';
+  const wrapped = `solve(${equationsText}${varsArg})`;
+  return hasSemi ? `${wrapped};` : wrapped;
+}
+
+// The input field is a multiline textarea so a system of equations can be typed one
+// equation per line (Shift+Enter for a new line, plain Enter submits - see app.js). This
+// trims each line and drops blank ones (so a trailing blank line from just pressing
+// Shift+Enter isn't itself a missing equation), but otherwise leaves the line breaks alone -
+// used for the history entry itself (see app.js's submit()), which keeps a system displayed
+// the way it was typed, one equation per line. A single-line input passes through unchanged.
+export function normalizeMultilineInput(text) {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join('\n');
+}
+
+// The string actually handed to the engine: same cleanup as normalizeMultilineInput, but
+// each line joined with " and " instead of a newline - Xcas's own syntax for handing solve()
+// several equations at once (see wrapBareEquation above), which is also exactly what
+// giacToLatex already knows how to render.
+export function joinInputLines(text) {
+  return normalizeMultilineInput(text).replace(/\n/g, ' and ');
+}
+
+// Recognizes a `solve(<equations>,[<var1>,<var2>,...])` call - the shape wrapBareEquation
+// now always produces - and returns the variable names in the order solve() was told them,
+// or null if `sentExpr` (the exact string just sent to the engine) isn't shaped like that
+// (any other command, or a `solve(...)` call typed by hand with no explicit variable list).
+// Used to relabel the tuple(s) solve() hands back (see parseSolveSolutions below) with the
+// variable each slot belongs to, since "(1 4)" on its own doesn't say which value is x and
+// which is y.
+function parseSolveVarList(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  if (!body.startsWith('solve(') || !body.endsWith(')')) return null;
+  if (findMatchingParen(body, 5) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(6, -1), ',');
+  if (args.length < 2) return null;
+  const last = args[args.length - 1].trim();
+  const m = last.match(/^\[\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*\]$/);
+  return m ? m[1].split(',').map((v) => v.trim()) : null;
+}
+
+// Turns solve()'s raw "list[[v1,v2],[v1,v2],...]" (each inner list one solution, in the same
+// order as `varNames`) into one labeled clause per solution, e.g. "x=1 and y=4". With more
+// than one solution each variable also gets a subscript naming which solution it belongs to
+// ("x_1=1 and y_1=4", "x_2=3 and y_2=-2", ...) - the caller (evaluate()/evaluateApprox())
+// puts one clause per line rather than running them together, so the subscript is what
+// actually distinguishes them. Returns null for any shape that doesn't match - no solutions
+// ("[]"), or a result that isn't actually a plain list of `varNames`-length tuples - so the
+// caller falls back to showing Giac's own output untouched.
+function parseSolveSolutions(raw, varNames) {
+  let inner;
+  if (raw.startsWith('list[') && raw.endsWith(']')) inner = raw.slice(5, -1);
+  else if (raw.startsWith('[') && raw.endsWith(']')) inner = raw.slice(1, -1);
+  else return null;
+  if (!inner.trim()) return null;
+
+  const tuples = [];
+  for (const sol of splitTopLevel(inner, ',')) {
+    const t = sol.trim();
+    if (!(t.startsWith('[') && t.endsWith(']') && findMatchingBracket(t, 0) === t.length - 1)) return null;
+    const values = splitTopLevel(t.slice(1, -1), ',').map((v) => v.trim());
+    if (values.length !== varNames.length) return null;
+    tuples.push(values);
+  }
+
+  return tuples.map((values, idx) => {
+    const suffix = tuples.length > 1 ? `_${idx + 1}` : '';
+    return varNames.map((name, i) => `${name}${suffix}=${values[i]}`).join(' and ');
+  });
+}
+
+// Stacks each already-labeled solution clause (see parseSolveSolutions) on its own row via
+// MathJax's `gathered` environment - the same technique historyEntry.js uses for a
+// multi-line input. Renders each clause separately (rather than the whole block as one
+// string) since giacToLatex only understands one Giac expression at a time. Returns null,
+// same as giacToLatex itself, if any clause fails to convert.
+function renderGatheredLatex(clauses) {
+  const rendered = clauses.map((clause) => giacToLatex(clause));
+  return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : null;
+}
+
+// Builds the {text, latex} pair for a solve() result once it's known which variables solve()
+// was given (see parseSolveVarList) - shared by evaluate() and both spots in evaluateApprox()
+// that need it. Returns null (meaning: fall back to Giac's own rendering) whenever `varNames`
+// is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions).
+function formatSolveResult(raw, varNames) {
+  const clauses = varNames && parseSolveSolutions(raw, varNames);
+  if (!clauses) return null;
+  return {
+    text: clauses.join('\n'),
+    latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
+  };
+}
+
 // Low-level access to the engine for callers (plotting) that need to run their own
 // caseval expression and parse the raw string themselves, skipping the scalar-result
 // shaping (quote stripping, latex round-trip) that evaluate() does.
@@ -297,10 +517,9 @@ async function fetchLatex(out) {
 // - raw: the untouched string Giac returned
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
-export async function evaluate(expr) {
-  let out = stripTrailingSemicolon(
-    await rawEvalAsync(normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(expr)))),
-  );
+export async function evaluate(expr, knownConstants) {
+  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(wrapBareEquation(expr, knownConstants))));
+  let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
   if (out.startsWith('GIAC_ERROR')) {
     return { raw: out, isError: true, text: out.slice(11).trim(), latex: null, isGraphics: false };
@@ -342,6 +561,16 @@ export async function evaluate(expr) {
         isGraphics: false,
       };
     }
+  }
+
+  // solve()'s own "(1 4)"-style tuple doesn't say which value is which variable - relabel it
+  // to "x=1 and y=4" (see parseSolveSolutions), one solution per line, whenever `sentExpr`
+  // was a solve() call with an explicit variable list (wrapBareEquation's path above, or the
+  // same thing typed by hand). `raw` is left untouched either way, so copying the result
+  // (see historyEntry.js) still copies exactly what Giac returned.
+  const solved = formatSolveResult(out, parseSolveVarList(sentExpr));
+  if (solved) {
+    return { raw: out, isError: false, text: solved.text, latex: solved.latex, isGraphics: false };
   }
 
   const latexOut = await fetchLatex(out);
@@ -429,8 +658,8 @@ const EXACT_DECIMAL_TAIL_RE = /^(.+)=(-?\d+\.\d+)$/;
 //   decimal actually loses information - i.e. the exact value's decimal expansion doesn't
 //   terminate (1/3 -> 0.3333...) or isn't rational to begin with (sqrt(2), pi, ...).
 //   1/2 -> 0.5 is exact, so it gets no marker.
-export async function evaluateApprox(expr) {
-  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(expr)));
+export async function evaluateApprox(expr, knownConstants) {
+  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeNcrAlias(wrapBareEquation(expr, knownConstants))));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
@@ -439,7 +668,7 @@ export async function evaluateApprox(expr) {
   if (out.startsWith('GIAC_ERROR')) {
     // exact() couldn't wrap this input (e.g. a graphics/plot command) - fall back to a
     // plain evaluation rather than failing the whole submission.
-    return evaluate(expr);
+    return evaluate(expr, knownConstants);
   }
 
   const unquoted = stripQuotes(out);
@@ -475,11 +704,19 @@ export async function evaluateApprox(expr) {
     return { raw: out, isError: false, text: out, latex: out, isGraphics: false };
   }
 
+  // solve()'s own tuple form doesn't say which value is which variable - see the matching
+  // comment in evaluate() above. `raw` stays whatever Giac returned either way.
+  const varNames = parseSolveVarList(normalized);
+
   // Anything else (an equation, list, matrix, complex number, ...) doesn't get Giac's
   // automatic "=decimal" tail, so approximate it explicitly.
   let approxOut = stripTrailingSemicolon(await rawEvalAsync(`evalf(${out})`));
   if (approxOut.startsWith('GIAC_ERROR')) {
     // evalf() failed for some reason - show the exact form rather than an error.
+    const solvedExact = formatSolveResult(out, varNames);
+    if (solvedExact) {
+      return { raw: out, isError: false, text: solvedExact.text, latex: solvedExact.latex, isGraphics: false };
+    }
     const latexOut = await fetchLatex(out);
     return { raw: out, isError: false, text: out, latex: latexOut, isGraphics: false };
   }
@@ -487,6 +724,11 @@ export async function evaluateApprox(expr) {
   const approxUnquoted = stripQuotes(approxOut);
   if (approxUnquoted !== approxOut) {
     return { raw: approxOut, isError: false, text: approxUnquoted, latex: null, isGraphics: false };
+  }
+
+  const solvedApprox = formatSolveResult(approxOut, varNames);
+  if (solvedApprox) {
+    return { raw: approxOut, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false };
   }
 
   const latexOut = await fetchLatex(approxOut);

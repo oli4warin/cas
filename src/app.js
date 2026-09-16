@@ -6,6 +6,8 @@ import {
   cancelCurrentEval,
   looksIncomplete,
   reinsertableValue,
+  joinInputLines,
+  normalizeMultilineInput,
   evaluateRaw as giacEvaluateRaw,
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
@@ -152,9 +154,9 @@ export function mountApp(root) {
   const previewWrap = h('div', { class: 'formula-preview formula-preview--empty' }, previewSpan);
   let previewDebounce = null;
 
-  const input = h('input', {
+  const input = h('textarea', {
     class: 'input-row__field',
-    type: 'text',
+    rows: 1,
     placeholder: 'Waiting for engine…',
     autocomplete: 'off',
     autocorrect: 'off',
@@ -191,6 +193,7 @@ export function mountApp(root) {
     h('span', null, 'Enter/Tab insert selection at cursor'),
     h('span', null, 'Function names suggest as you type - Tab picks a candidate, then ←/→/Tab cycle, Enter or click confirms, Esc dismisses'),
     h('span', null, 'Enter evaluate (no selection)'),
+    h('span', null, 'Shift+Enter new line - one equation per line solves as a system'),
     h('span', null, 'Ctrl+Enter evaluate numerically'),
     h('span', null, 'Enter on empty input repeats the last one'),
     h('span', null, 'Esc clear selection (or return to input from plot/table)'),
@@ -411,8 +414,19 @@ export function mountApp(root) {
     onInputChanged();
   }
 
+  // Grows the textarea to fit its content (one equation per line - see joinInputLines/the
+  // Enter handling below), capped so a long paste scrolls internally instead of pushing the
+  // rest of the page around. Reset to 'auto' first so shrinking (deleting a line) is picked
+  // up too, not just growth - scrollHeight never reports smaller than the current height
+  // otherwise.
+  function autosizeInput() {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
+  }
+
   function updatePreview() {
-    const latex = giacToLatex(input.value) || '';
+    autosizeInput();
+    const latex = giacToLatex(joinInputLines(input.value)) || '';
     clearTimeout(previewDebounce);
     previewDebounce = setTimeout(() => {
       if (latex) {
@@ -609,8 +623,12 @@ export function mountApp(root) {
     const engineReady = state.status === 'ready';
     // An empty input on Enter/Ctrl+Enter repeats the last expression (in that key's mode -
     // exact or approx) rather than doing nothing, so re-running the previous computation
-    // doesn't require retyping or reaching for history browsing.
-    const expr = input.value.trim() || state.history[state.history.length - 1]?.input || '';
+    // doesn't require retyping or reaching for history browsing. `displayInput` keeps
+    // multiple lines (Shift+Enter for a new one - see handleKeyDown) as-typed, one equation
+    // per line, for the history entry; `expr` is the single " and "-joined line actually
+    // handed to the engine, e.g. solving "x+y=5" and "y-x=3" together.
+    const displayInput = normalizeMultilineInput(input.value) || state.history[state.history.length - 1]?.input || '';
+    const expr = joinInputLines(displayInput);
     if (!expr || !engineReady || state.busy) return;
     if (!force && looksIncomplete(expr)) {
       state.warning = 'This expression looks unfinished (dangling operator or unmatched parenthesis) - evaluating it can take a very long time. Press Enter to run it anyway.';
@@ -621,10 +639,11 @@ export function mountApp(root) {
     renderWarning();
     state.busy = true;
     renderStatus();
-    const result = approx ? await giacEvaluateApprox(expr) : await giacEvaluate(expr);
+    const knownConstants = new Set(state.definitions.keys());
+    const result = approx ? await giacEvaluateApprox(expr, knownConstants) : await giacEvaluate(expr, knownConstants);
     state.busy = false;
     renderStatus();
-    pushHistoryEntry({ input: expr, ...result });
+    pushHistoryEntry({ input: displayInput, ...result });
     setDefinitions(applyEntryToDefinitions(state.definitions, expr, result));
     input.value = '';
     state.navPos = -1;
@@ -684,22 +703,26 @@ export function mountApp(root) {
     if (e.key !== 'Tab') hideCompletions();
 
     if (e.key === 'Enter') {
-      e.preventDefault();
       const step = currentStep();
       // With a step selected (via Up/Down below), Enter inserts it instead of submitting -
       // browsing never touched the input, so this is the only way its selection actually
       // reaches the input.
       if (step) {
+        e.preventDefault();
         insertStepAtCursor(step);
         state.navPos = -1;
         updateSelection();
         return;
       }
-      // Enter always runs the expression as-is; Shift+Enter is the one that checks it
-      // first (see submit's `force` param) - the reverse of the key's usual meaning, but
-      // it keeps the everyday key (Enter) free of the completeness check. Ctrl+Enter (or
-      // Cmd+Enter) evaluates numerically instead of exactly.
-      submit({ force: !e.shiftKey, approx: e.ctrlKey || e.metaKey });
+      // Shift+Enter inserts a newline (the textarea's own default behavior, left
+      // untouched) so a system of equations can be typed one per line - see joinInputLines,
+      // which folds them into a single " and "-joined expression on submit. Plain Enter
+      // always runs the expression as-is, skipping the completeness check below (see
+      // submit's `force` param) so the everyday key never second-guesses what was typed.
+      // Ctrl+Enter (or Cmd+Enter) evaluates numerically instead of exactly.
+      if (e.shiftKey) return;
+      e.preventDefault();
+      submit({ force: true, approx: e.ctrlKey || e.metaKey });
       return;
     }
 
