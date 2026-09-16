@@ -349,16 +349,57 @@ function collectFreeVariables(s, knownConstants) {
   return result;
 }
 
+// Xcas's derivative shorthand - "y'", "f''", etc, meaning "y differentiated once w.r.t. its
+// (implicit) independent variable". Collects the distinct base names that appear this way in
+// `s`, in first-appearance order - these are exactly the unknown functions a desolve() call
+// needs telling about (see wrapBareEquation below). Unlike collectFreeVariables, this doesn't
+// care whether the name is also followed by "(" (an ODE is often typed either as "y'=y" or
+// "y'(x)=y(x)" - both mean the same unknown function y).
+const PRIMED_IDENT_RE = /([A-Za-z_][A-Za-z0-9_]*)'+/g;
+
+function collectPrimedFunctionNames(s) {
+  const seen = new Set();
+  const result = [];
+  let m;
+  PRIMED_IDENT_RE.lastIndex = 0;
+  while ((m = PRIMED_IDENT_RE.exec(s))) {
+    const name = m[1];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    result.push(name);
+  }
+  return result;
+}
+
+// desolve()'s independent variable has to be named explicitly (see wrapBareEquation below) -
+// 'x' is the obvious default (matches diff/derive's own default elsewhere in this file), but
+// falls back to the first of these candidates that isn't itself one of the unknown functions
+// (e.g. an equation naming its unknown function "x" instead of the usual "y").
+const INDEPENDENT_VAR_CANDIDATES = ['x', 't', 's'];
+
+function pickIndependentVar(funcNames) {
+  return INDEPENDENT_VAR_CANDIDATES.find((v) => !funcNames.includes(v)) || 'x';
+}
+
 // A line that's just one or more equations and no command at all - "x^2-3=0", or a system
 // as "x+y=5 and y-x=3" or "[x+y=5,y-x=3]" - almost always means "solve this", so wrap it the
-// way a user reaching for the `solve` button (see EXPRESSION_BUTTONS in app.js) would.
-// Anything already wrapped in a call (including `solve(...)` itself) has its "=" at depth > 0
-// and is left untouched. `knownConstants` (names already assigned this session) are excluded
-// from the appended variable list - solve() is asked for only the genuinely free unknowns.
-// The list is always given explicitly, even for a single variable (Giac returns the exact
-// same solutions either way - just each one wrapped one list level deeper - see
-// parseSolveVarList/parseSolveSolutions below), so the result can always be relabeled with
-// which variable each value belongs to.
+// way a user reaching for the `solve` button (see EXPRESSION_BUTTONS in app.js) would. The
+// same detection, but for equations involving a derivative of a *single* unknown function
+// ("y'=y", "f''+f=0", or an initial-value problem spread over two lines like "y'=y" and
+// "y(0)=8") means "solve this ODE" instead - wrapped in
+// desolve(equations,independent_var,function) rather than solve(equations,vars); Giac accepts
+// a list of equations there the same way it does for solve(), so any number of extra
+// conditions on the same function are fine. What's still disallowed is a derivative *system*
+// naming more than one distinct unknown function (e.g. "y'=z and z'=-y") - that's deliberately
+// left going through solve() below for now, since desolve()'s own multi-function shape
+// ([eq1,eq2],x,[f1,f2]) doesn't work yet and producing that call would just fail. Anything
+// already wrapped in a call (including
+// `solve(...)`/`desolve(...)` themselves) has its "=" at depth > 0 and is left untouched.
+// `knownConstants` (names already assigned this session) are excluded from solve()'s appended
+// variable list - it's asked for only the genuinely free unknowns. The list is always given
+// explicitly, even for a single variable (Giac returns the exact same solutions either way -
+// just each one wrapped one list level deeper - see parseSolveVarList/parseSolveSolutions
+// below), so the result can always be relabeled with which variable each value belongs to.
 export function wrapBareEquation(expr, knownConstants = new Set()) {
   const s = expr.trim();
   if (!s) return expr;
@@ -367,11 +408,13 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
   if (!body) return expr;
 
   let equationsText = null;
+  let equationParts = null;
 
   if (body[0] === '[' && findMatchingBracket(body, 0) === body.length - 1) {
     const parts = splitTopLevel(body.slice(1, -1), ',');
     if (parts.length > 0 && parts.every((p) => hasTopLevelBareEquals(p.trim()))) {
       equationsText = body;
+      equationParts = parts.map((p) => p.trim());
     }
   }
 
@@ -379,14 +422,30 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
     const andParts = splitTopLevelKeyword(body, 'and');
     if (andParts.length > 1 && andParts.every((p) => hasTopLevelBareEquals(p.trim()))) {
       equationsText = body;
+      equationParts = andParts.map((p) => p.trim());
     }
   }
 
   if (equationsText == null && hasTopLevelBareEquals(body)) {
     equationsText = body;
+    equationParts = [body.trim()];
   }
 
   if (equationsText == null) return expr;
+
+  // Multi-function systems disabled for now - desolve() doesn't handle the
+  // [eq1,eq2],x,[f1,f2] shape correctly yet, so anything naming more than one distinct
+  // primed function (e.g. "y'=z and z'=-y") falls through to solve() below same as before,
+  // rather than producing a desolve() call that doesn't actually work. Multiple *equations*
+  // for the *same* function (e.g. "y'=y" and "y(0)=8", an initial condition) are fine, though
+  // - desolve() takes a list of those exactly like solve() does for a system.
+  const funcNames = collectPrimedFunctionNames(equationsText);
+  if (funcNames.length === 1) {
+    const indepVar = pickIndependentVar(funcNames);
+    const eqsArg = equationParts.length > 1 ? `[${equationParts.join(',')}]` : equationParts[0];
+    const wrapped = `desolve(${eqsArg},${indepVar},${funcNames[0]})`;
+    return hasSemi ? `${wrapped};` : wrapped;
+  }
 
   const freeVars = collectFreeVariables(equationsText, knownConstants);
   const varsArg = freeVars.length > 0 ? `,[${freeVars.join(',')}]` : '';
@@ -533,6 +592,42 @@ function formatSolveResult(raw, varNames) {
     latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
     raw: reinsertRaw !== undefined ? reinsertRaw : raw,
   };
+}
+
+// Recognizes a desolve(...) call and returns the name of the unknown function it solves for,
+// or null if `sentExpr` isn't shaped like one desolve() can be labeled for. Mirrors
+// parseSolveVarList above, but desolve's own return value is already just the solution
+// expression itself (not a tuple/list needing unwrapping - see parseSolveSolutions), so all
+// that's needed here is the function's name to prefix it with (see formatDesolveResult).
+// Only a single, bare function name is handled - a bracketed list (a system, e.g.
+// "desolve([...],x,[y,z])") is left unlabeled since wrapBareEquation itself never produces
+// one right now (systems don't work with desolve yet - see its own comment) and a
+// hand-typed one wouldn't say which list slot is which solution anyway.
+function parseDesolveFuncName(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  if (!/^desolve\(/i.test(body) || !body.endsWith(')')) return null;
+  const openIdx = body.indexOf('(');
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',');
+  if (args.length === 0) return null;
+  const last = args[args.length - 1].trim();
+  if (args.length >= 2 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(last)) return last;
+  // No explicit function argument (e.g. a hand-typed "desolve(y'=y)") - fall back to whatever
+  // single function the equation itself names as a derivative.
+  const funcNames = collectPrimedFunctionNames(args[0]);
+  return funcNames.length === 1 ? funcNames[0] : null;
+}
+
+// Builds the {text, latex, raw} triple for a desolve() result once it's known which function
+// desolve() was solving for (see parseDesolveFuncName) - labels the display as "y=<solution>"
+// (matching how formatSolveResult labels solve()'s own results), e.g. "y=e^x" rather than the
+// bare "e^x" Giac itself returns, while `raw` stays the bare, unlabeled solution so copying it
+// back out (see historyEntry.js) reinserts just the expression, not "y=" along with it.
+function formatDesolveResult(raw, funcName) {
+  if (!funcName) return null;
+  const clause = `${funcName}=${raw}`;
+  return { text: clause, latex: giacToLatex(clause) || null, raw };
 }
 
 // Low-level access to the engine for callers (plotting) that need to run their own
@@ -776,6 +871,16 @@ export async function evaluate(expr, knownConstants) {
     return { raw: solved.raw, isError: false, text: solved.text, latex: solved.latex, isGraphics: false };
   }
 
+  // desolve()'s own bare solution expression doesn't say which function it's the solution
+  // for - relabel it to "y=e^x" (see formatDesolveResult) whenever `sentExpr` was a desolve()
+  // call with a recognizable function argument (wrapBareEquation's path above, or the same
+  // thing typed by hand). `raw` is left as Giac's own bare expression, so copying the result
+  // (see historyEntry.js) reinserts just the solution, not the "y=" label.
+  const desolved = formatDesolveResult(out, parseDesolveFuncName(sentExpr));
+  if (desolved) {
+    return { raw: desolved.raw, isError: false, text: desolved.text, latex: desolved.latex, isGraphics: false };
+  }
+
   const latexOut = await fetchLatex(out);
   return { raw: out, isError: false, text: out, latex: latexOut, isGraphics: false };
 }
@@ -927,6 +1032,10 @@ export async function evaluateApprox(expr, knownConstants) {
   // solve()'s own tuple form doesn't say which value is which variable - see the matching
   // comment in evaluate() above (same single-solution `raw` unwrapping applies below).
   const varNames = parseSolveVarList(normalized);
+  // desolve()'s own bare solution expression doesn't say which function it's the solution
+  // for - see the matching comment in evaluate() above (same "<func>=<solution>" labeling,
+  // bare `raw`, applies below).
+  const desolveFuncName = parseDesolveFuncName(normalized);
 
   // Anything else (an equation, list, matrix, complex number, ...) doesn't get Giac's
   // automatic "=decimal" tail, so approximate it explicitly.
@@ -936,6 +1045,10 @@ export async function evaluateApprox(expr, knownConstants) {
     const solvedExact = formatSolveResult(out, varNames);
     if (solvedExact) {
       return { raw: solvedExact.raw, isError: false, text: solvedExact.text, latex: solvedExact.latex, isGraphics: false };
+    }
+    const desolvedExact = formatDesolveResult(out, desolveFuncName);
+    if (desolvedExact) {
+      return { raw: desolvedExact.raw, isError: false, text: desolvedExact.text, latex: desolvedExact.latex, isGraphics: false };
     }
     const latexOut = await fetchLatex(out);
     return { raw: out, isError: false, text: out, latex: latexOut, isGraphics: false };
@@ -949,6 +1062,11 @@ export async function evaluateApprox(expr, knownConstants) {
   const solvedApprox = formatSolveResult(approxOut, varNames);
   if (solvedApprox) {
     return { raw: solvedApprox.raw, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false };
+  }
+
+  const desolvedApprox = formatDesolveResult(approxOut, desolveFuncName);
+  if (desolvedApprox) {
+    return { raw: desolvedApprox.raw, isError: false, text: desolvedApprox.text, latex: desolvedApprox.latex, isGraphics: false };
   }
 
   // A bare number is handled without a Giac round-trip - formatApproxSci already has enough
