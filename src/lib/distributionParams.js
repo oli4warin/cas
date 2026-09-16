@@ -15,8 +15,8 @@ const FAMILY_PARAMS = {
   poisson: [{ key: 'mu', label: 'Mean (λ)' }],
   geometric: [{ key: 'p', label: 'Probability of success (p)' }],
   normald: [
-    { key: 'mu', label: 'Mean (μ)' },
-    { key: 'sigma', label: 'Standard deviation (σ)' },
+    { key: 'mu', label: 'Mean (μ)', default: '0' },
+    { key: 'sigma', label: 'Standard deviation (σ)', default: '1' },
   ],
   student: [{ key: 'n', label: 'Degrees of freedom (ν)' }],
   chisquare: [{ key: 'n', label: 'Degrees of freedom (k)' }],

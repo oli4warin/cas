@@ -8,6 +8,8 @@
 // path needs a fully-parseable expression and a worker round trip, both wrong fits for a
 // per-keystroke preview.
 
+import { XCAS_COMMANDS } from './xcasCommands.js';
+
 const UNARY_PREC = 7; // same as '^', so "-x^2" parses as -(x^2), matching math convention.
 
 // '|' (Giac's restriction/"such that" operator, e.g. "solve(x^2=1|x>0)") binds loosest of
@@ -289,6 +291,15 @@ function renderVarName(name) {
   return `${base}_{${sub}}`;
 }
 
+// "_" has catcode "subscript" throughout MathJax's TeX input (that's fixed at tokenization,
+// not toggled by mode-switching macros like \text{} - wrapping in \text{} alone does NOT
+// stop "binomial_cdf" from starting a subscript at the "_"), so the only way to get a
+// literal underscore is to escape it. Safe to escape blindly: the tokenizer only ever
+// produces identifiers made of [A-Za-z0-9_].
+function operatorLabel(name) {
+  return name.length > 1 ? `\\operatorname{${name.replace(/_/g, '\\_')}}` : name;
+}
+
 function render(node) {
   if (node == null) return '';
   switch (node.type) {
@@ -298,6 +309,12 @@ function render(node) {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
       if (GREEK[lname]) return GREEK[lname] + primes;
+      // A known command name typed without its "(" yet (e.g. mid-typing "normal_cdf") is
+      // still a function reference, not a subscripted variable - render it the same way a
+      // finished call would (see renderCall's fallback below) so the \operatorname{} styling
+      // and underscore-escaping apply as soon as the name is recognized, not only once "("
+      // appears.
+      if (XCAS_COMMANDS[lname]) return operatorLabel(node.name) + primes;
       return renderVarName(node.name) + primes;
     }
     case 'text':
@@ -409,13 +426,7 @@ function renderCall(node) {
     return `\\binom{${a(0)}}{${a(1)}}`;
   }
 
-  // "_" has catcode "subscript" throughout MathJax's TeX input (that's fixed at
-  // tokenization, not toggled by mode-switching macros like \text{} - wrapping in \text{}
-  // alone does NOT stop "binomial_cdf" from starting a subscript at the "_"), so the only
-  // way to get a literal underscore is to escape it. Safe to escape blindly: the tokenizer
-  // only ever produces identifiers made of [A-Za-z0-9_].
-  const label = name.length > 1 ? `\\operatorname{${name.replace(/_/g, '\\_')}}` : name;
-  return `${label}${primes}\\left(${args.map((x) => (x != null ? render(x) : '')).join(',\\ ')}\\right)`;
+  return `${operatorLabel(name)}${primes}\\left(${args.map((x) => (x != null ? render(x) : '')).join(',\\ ')}\\right)`;
 }
 
 // Converts a (possibly incomplete) giac expression string into LaTeX for live preview.
