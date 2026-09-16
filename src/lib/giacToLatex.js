@@ -275,6 +275,20 @@ function renderMatrix(node) {
   return `\\left(\\begin{array}{${'c'.repeat(cols)}}\n${body}\n\\end{array}\\right)`;
 }
 
+// MathJax's "_" only pulls in a single following token as the subscript, so an unbraced
+// multi-character subscript like "x_10" renders as x with subscript "1" followed by a
+// literal "0" instead of "x₁₀" (e.g. solve()'s per-solution suffix, see parseSolveSolutions
+// in lib/giac.js). Brace the part after the first "_" so it's read as one subscript group
+// regardless of length; any further underscores inside it are escaped so they stay literal
+// rather than starting a nested subscript.
+function renderVarName(name) {
+  const idx = name.indexOf('_');
+  if (idx === -1) return name;
+  const base = name.slice(0, idx);
+  const sub = name.slice(idx + 1).replace(/_/g, '\\_');
+  return `${base}_{${sub}}`;
+}
+
 function render(node) {
   if (node == null) return '';
   switch (node.type) {
@@ -284,7 +298,7 @@ function render(node) {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
       if (GREEK[lname]) return GREEK[lname] + primes;
-      return node.name + primes;
+      return renderVarName(node.name) + primes;
     }
     case 'text':
       return `\\text{${escapeText(node.value)}}`;
@@ -331,7 +345,10 @@ function renderBin(node) {
   if (node.op === '/') {
     return `\\frac{${render(stripRedundantParen(node.left))}}{${render(stripRedundantParen(node.right))}}`;
   }
-  if (node.op === '^') return `${renderPowerBase(node.left)}^{${render(node.right)}}`;
+  // A user-typed paren around the whole exponent (e.g. "x^(10+a)") is needed for Giac to
+  // parse the precedence correctly, but the "^{...}" braces already group it visually -
+  // same reasoning as stripRedundantParen's use in the '/' case above.
+  if (node.op === '^') return `${renderPowerBase(node.left)}^{${render(stripRedundantParen(node.right))}}`;
   if (node.op === '*') return `${render(node.left)} \\cdot ${render(node.right)}`;
   if (node.op === '*implicit') return `${render(node.left)}${render(node.right)}`;
   // Word operators ("and"/"or"/"xor") need an explicit \text{} (plain math-mode letters
