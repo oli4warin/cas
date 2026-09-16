@@ -291,8 +291,6 @@ function renderVarName(name) {
   return `${base}_{${sub}}`;
 }
 
-<<<<<<< HEAD
-=======
 // "_" has catcode "subscript" throughout MathJax's TeX input (that's fixed at tokenization,
 // not toggled by mode-switching macros like \text{} - wrapping in \text{} alone does NOT
 // stop "binomial_cdf" from starting a subscript at the "_"), so the only way to get a
@@ -302,7 +300,6 @@ function operatorLabel(name) {
   return name.length > 1 ? `\\operatorname{${name.replace(/_/g, '\\_')}}` : name;
 }
 
->>>>>>> main
 function render(node) {
   if (node == null) return '';
   switch (node.type) {
@@ -312,15 +309,12 @@ function render(node) {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
       if (GREEK[lname]) return GREEK[lname] + primes;
-<<<<<<< HEAD
-=======
       // A known command name typed without its "(" yet (e.g. mid-typing "normal_cdf") is
       // still a function reference, not a subscripted variable - render it the same way a
       // finished call would (see renderCall's fallback below) so the \operatorname{} styling
       // and underscore-escaping apply as soon as the name is recognized, not only once "("
       // appears.
       if (XCAS_COMMANDS[lname]) return operatorLabel(node.name) + primes;
->>>>>>> main
       return renderVarName(node.name) + primes;
     }
     case 'text':
