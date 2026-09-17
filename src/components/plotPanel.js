@@ -203,8 +203,18 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
   }
 
   function makeTRange() {
-    tminEl = h('input', { class: 'plot-row__tInput', type: 'number', oninput: (e) => onTChange('tmin', e.target.value) });
-    tmaxEl = h('input', { class: 'plot-row__tInput', type: 'number', oninput: (e) => onTChange('tmax', e.target.value) });
+    tminEl = h('input', {
+      class: 'plot-row__tInput',
+      type: 'text',
+      placeholder: '0',
+      oninput: (e) => onTChange('tmin', e.target.value),
+    });
+    tmaxEl = h('input', {
+      class: 'plot-row__tInput',
+      type: 'text',
+      placeholder: '2*pi',
+      oninput: (e) => onTChange('tmax', e.target.value),
+    });
     return h('span', { class: 'plot-row__tRange' }, 't:', tminEl, 'to', tmaxEl);
   }
 
@@ -241,8 +251,8 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
       if (fieldEls[field] && fieldEls[field].value !== row[field]) fieldEls[field].value = row[field];
       previews[field]?.update(giacToLatex(row[field]) || '');
     }
-    if (tminEl && tminEl.value !== String(row.tmin)) tminEl.value = row.tmin;
-    if (tmaxEl && tmaxEl.value !== String(row.tmax)) tmaxEl.value = row.tmax;
+    if (tminEl && tminEl.value !== row.tmin) tminEl.value = row.tmin;
+    if (tmaxEl && tmaxEl.value !== row.tmax) tmaxEl.value = row.tmax;
 
     toggleBtn.textContent = row.visible ? '●' : '○';
     toggleBtn.title = row.visible ? 'Hide' : 'Show';
@@ -460,7 +470,7 @@ export function PlotPanel({
           onFieldFocus: (field) => {
             focused = { rowId: row.id, field };
           },
-          onTChange: (which, value) => updateRow(row.id, { [which]: parseFloat(value) || 0 }),
+          onTChange: (which, value) => updateRow(row.id, { [which]: value }),
           onToggle: () => updateRow(row.id, { visible: !row.visible }),
           onRemove: () => removeRow(row.id),
         });

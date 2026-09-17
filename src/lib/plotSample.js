@@ -76,14 +76,24 @@ export async function sampleFunction(evaluateRaw, expr, xmin, xmax, points) {
   return ys.map((y, i) => ({ x: xmin + i * step, y }));
 }
 
+// tmin/tmax are Giac expressions (e.g. "pi", "sqrt(2)", "-2*pi/3"), not JS numbers, so the
+// endpoints - and the step built from them - are left symbolic and only evalf()'d at the
+// very end, on the engine side. That's what lets the t-range fields take any expression
+// the CAS can understand instead of just plain decimals.
+function orZero(expr) {
+  const t = expr.trim();
+  return t || '0';
+}
+
 // Same idea as buildSampleExpr(), but for a parametric curve (x(t), y(t)) over t in
 // [tmin, tmax]. Both components are batched into one call as [x,y] pairs - confirmed
 // against the actual engine that seq() of a [.,.] literal comes back as a flat list of
 // two-element lists, not nested any deeper.
 export function buildParametricSampleExpr(exprX, exprY, tmin, tmax, points) {
   const n = Math.max(2, Math.floor(points));
-  const step = (tmax - tmin) / (n - 1);
-  const tAt = `(${formatNum(tmin)})+(k)*(${formatNum(step)})`;
+  const tminE = orZero(tmin);
+  const tmaxE = orZero(tmax);
+  const tAt = `(${tminE})+(k)*(((${tmaxE})-(${tminE}))/(${n - 1}))`;
   return `evalf(seq([subst((${exprX}),t=${tAt}),subst((${exprY}),t=${tAt})],k,0,${n - 1}))`;
 }
 
@@ -126,8 +136,9 @@ export async function sampleParametric(evaluateRaw, exprX, exprY, tmin, tmax, po
 // reuses the exact same [x,y]-pair batching and parsing as sampleParametric().
 export function buildComplexSampleExpr(exprZ, tmin, tmax, points) {
   const n = Math.max(2, Math.floor(points));
-  const step = (tmax - tmin) / (n - 1);
-  const tAt = `(${formatNum(tmin)})+(k)*(${formatNum(step)})`;
+  const tminE = orZero(tmin);
+  const tmaxE = orZero(tmax);
+  const tAt = `(${tminE})+(k)*(((${tmaxE})-(${tminE}))/(${n - 1}))`;
   return `evalf(seq([re(subst((${exprZ}),t=${tAt})),im(subst((${exprZ}),t=${tAt}))],k,0,${n - 1}))`;
 }
 

@@ -3,8 +3,10 @@
 // this state themselves and pass it into <PlotPanel> as controlled props.
 
 export const DEFAULT_VIEW = { xmin: -10, xmax: 10, ymin: -6, ymax: 6 };
-const DEFAULT_TMIN = 0;
-const DEFAULT_TMAX = 2 * Math.PI;
+// Kept as Giac expression text (not JS numbers) so the t-range fields can take anything
+// the CAS understands, e.g. "pi", "sqrt(2)", "-2*pi/3".
+const DEFAULT_TMIN = '0';
+const DEFAULT_TMAX = '2*pi';
 
 let nextRowId = 1;
 export function makeRow() {
