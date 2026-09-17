@@ -838,7 +838,7 @@ export function evaluateRaw(expr) {
 // replicate it itself by re-running the result through regroup()/simplify() when the level
 // is above 0 (see applyAutosimplify). This module-level level is what that re-run reads;
 // the engine-side flag is still set too, for any print statement inside multi-line input.
-let autosimplifyLevel = 2;
+let autosimplifyLevel = 1;
 
 export function setAutosimplifyLevel(level) {
   autosimplifyLevel = level;

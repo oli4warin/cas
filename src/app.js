@@ -89,9 +89,12 @@ function buildHistorySteps(history) {
 // `wrap: false`, which instead drops any selection and inserts `prefix` as plain typed text
 // (see insertPlain) - used for bare identifiers (variables, digits, operators, constants,
 // "=", ":=") where wrapping a selection would glue it onto the identifier instead of
-// replacing it. `col` sends the group to the left (functions/variables) or right (the
-// calculator keypad) column - see toolbar__col--* in app.css - loosely following the
-// functions-left/keypad-right split Qalculate's keyboard uses.
+// replacing it. An item may instead carry `nav` ('left'/'right'/'up'/'down'/'backspace'),
+// which moves the cursor (see moveCursor) or deletes (see backspaceAtCursor) rather than
+// inserting anything - used for the arrow-key/backspace group below. `col` sends the group
+// to the left (functions/variables) or right (the calculator keypad) column - see
+// toolbar__col--* in app.css - loosely following the functions-left/keypad-right split
+// Qalculate's keyboard uses.
 const TOOLBAR_GROUPS = [
   {
     key: 'vars',
@@ -188,6 +191,23 @@ const TOOLBAR_GROUPS = [
       { label: '+', prefix: '+', wrap: false },
     ],
   },
+  {
+    key: 'nav',
+    col: 'right',
+    // Arrow-key cluster plus backspace and new-line for touchscreens, where those physical
+    // keys aren't reachable - moves the cursor, deletes, or inserts a newline (see
+    // moveCursor/backspaceAtCursor/insertNewline) instead of inserting a math snippet. Sits
+    // below the keypad, same 4-column grid: arrows fill one row, then backspace and new-line
+    // share the row below, half the width each.
+    items: [
+      { label: '←', nav: 'left' },
+      { label: '↑', nav: 'up' },
+      { label: '↓', nav: 'down' },
+      { label: '→', nav: 'right' },
+      { label: '⌫', nav: 'backspace', span2: true },
+      { label: '⏎', nav: 'newline', span2: true, title: 'New line - same as Shift+Enter' },
+    ],
+  },
 ];
 
 const EXAMPLES = ['integrate(sin(x)*x,x)', 'solve(x^2-5*x+6=0,x)', 'factor(x^3-1)', 'limit(sin(x)/x,x,0)'];
@@ -213,7 +233,7 @@ export function mountApp(root) {
     tableColumns: makeInitialColumns(),
     angleMode: 'RAD',
     approxMode: false,
-    autosimplify: 2, // 0=none, 1=regroup, 2=simplify - matches evaluate()'s own default in giac.js
+    autosimplify: 1, // 0=none, 1=regroup, 2=simplify - matches evaluate()'s own default in giac.js
     theme: getInitialTheme(),
     showText: getInitialShowText(),
     toolbarVisible: getInitialToolbarVisible(),
@@ -301,11 +321,6 @@ export function mountApp(root) {
   completionsBar.style.display = 'none';
   const inputRow = h('div', { class: 'input-row' }, input, submitBtn, stopBtn, completionsBar);
 
-  const newlineBtn = h(
-    'button',
-    { type: 'button', class: 'toolbar__btn toolbar__btn--wide', title: 'Same as pressing Shift+Enter', onclick: () => insertNewline() },
-    '⏎ New line',
-  );
   function renderToolbarGroup(g) {
     return h(
       'div',
@@ -316,7 +331,14 @@ export function mountApp(root) {
           {
             type: 'button',
             class: `toolbar__btn${t.span2 ? ' toolbar__btn--span2' : ''}`,
-            onclick: () => (t.wrap === false ? insertPlain(t.prefix) : insertSnippet(t.prefix, t.suffix)),
+            title: t.title,
+            onclick: () => {
+              if (t.nav === 'backspace') backspaceAtCursor();
+              else if (t.nav === 'newline') insertNewline();
+              else if (t.nav) moveCursor(t.nav);
+              else if (t.wrap === false) insertPlain(t.prefix);
+              else insertSnippet(t.prefix, t.suffix);
+            },
           },
           t.label,
         ),
@@ -336,7 +358,6 @@ export function mountApp(root) {
       { class: 'toolbar__col toolbar__col--right' },
       TOOLBAR_GROUPS.filter((g) => g.col === 'right').map(renderToolbarGroup),
     ),
-    newlineBtn,
   );
   const toolbarToggle = h(
     'button',
@@ -598,6 +619,66 @@ export function mountApp(root) {
 
   function insertSnippet(prefix, suffix) {
     insertAtCursor({ before: prefix, after: suffix }, { wrapSelection: true });
+  }
+
+  // Moves the textarea's cursor the way the physical arrow keys would - used by the nav
+  // group on the math keyboard (see TOOLBAR_GROUPS) for touchscreens where those keys
+  // aren't reachable. Synthetic key events don't trigger a textarea's native cursor
+  // movement, so this reimplements it: left/right collapse a selection to its near edge or
+  // else step by one character, up/down keep the column offset and clamp to the target
+  // line's length, the same way native caret movement does.
+  function moveCursor(dir) {
+    input.focus();
+    const value = input.value;
+    const start = input.selectionStart ?? value.length;
+    const end = input.selectionEnd ?? value.length;
+    let pos;
+    if (dir === 'left') {
+      pos = start !== end ? start : Math.max(0, start - 1);
+    } else if (dir === 'right') {
+      pos = start !== end ? end : Math.min(value.length, end + 1);
+    } else {
+      const lines = value.split('\n');
+      let lineIdx = 0;
+      let col = 0;
+      let offset = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const lineLen = lines[i].length;
+        if (i === lines.length - 1 || start <= offset + lineLen) {
+          lineIdx = i;
+          col = start - offset;
+          break;
+        }
+        offset += lineLen + 1;
+      }
+      const targetIdx = dir === 'up' ? lineIdx - 1 : lineIdx + 1;
+      if (targetIdx < 0) {
+        pos = 0;
+      } else if (targetIdx >= lines.length) {
+        pos = value.length;
+      } else {
+        let targetOffset = 0;
+        for (let i = 0; i < targetIdx; i++) targetOffset += lines[i].length + 1;
+        pos = targetOffset + Math.min(col, lines[targetIdx].length);
+      }
+    }
+    input.setSelectionRange(pos, pos);
+  }
+
+  // Deletes like the physical Backspace key would - used by the nav group's ⌫ button (see
+  // TOOLBAR_GROUPS) for touchscreens. Deletes the current selection if there is one,
+  // otherwise the one character before the cursor.
+  function backspaceAtCursor() {
+    input.focus();
+    const value = input.value;
+    const start = input.selectionStart ?? value.length;
+    const end = input.selectionEnd ?? value.length;
+    if (start === end && start === 0) return;
+    const delStart = start === end ? start - 1 : start;
+    const next = value.slice(0, delStart) + value.slice(end);
+    input.value = next;
+    input.setSelectionRange(delStart, delStart);
+    onInputChanged();
   }
 
   // Inserts literal text at the cursor, replacing any current selection like normal typing

@@ -507,6 +507,7 @@
   --kbd-log: #6fcf97;
   --kbd-calc: #5fc9ae;
   --kbd-alg: #e0836f;
+  --kbd-nav: #8f96a3;
 }
 
 :root[data-theme='light'] {
@@ -518,6 +519,7 @@
   --kbd-log: #1f7a4d;
   --kbd-calc: #0b6b58;
   --kbd-alg: #a13f2e;
+  --kbd-nav: #5c6470;
 }
 
 /* Functions/variables on the left, the numeric keypad on the right - loosely mirroring
@@ -590,6 +592,9 @@
 .toolbar__group--alg {
   --kbd-color: var(--kbd-alg);
 }
+.toolbar__group--nav {
+  --kbd-color: var(--kbd-nav);
+}
 
 @media (max-width: 560px) {
   .toolbar__btn {
@@ -633,13 +638,6 @@
 .toolbar__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.toolbar__btn--wide {
-  grid-column: 1 / -1;
-  width: 100%;
-  font-family: inherit;
-  font-weight: 600;
 }
 
 .toolbar__btn--span2 {

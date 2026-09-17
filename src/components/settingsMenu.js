@@ -8,7 +8,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
   let open = false;
   let angleMode = 'RAD';
   let approx = false;
-  let autosimplify = 2;
+  let autosimplify = 1;
   let showText = false;
   let theme = 'dark';
   let disabled = false;
