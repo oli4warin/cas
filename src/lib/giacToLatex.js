@@ -313,6 +313,11 @@ function render(node) {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
       if (GREEK[lname]) return GREEK[lname] + primes;
+      // Euler's constant is set upright ("\mathrm{e}"), same convention as Giac's own
+      // latex() (see fixEulerConstant in lib/giac.js) - distinguishes it from an italic
+      // variable, even though Giac itself never actually lets "e" be one (a bare "e" always
+      // evaluates to exp(1)).
+      if (lname === 'e') return '\\mathrm{e}' + primes;
       // A known command name (or one of its aliases, e.g. "normal_cdf" for "normald_cdf" -
       // see XCAS_COMMAND_ALIASES) typed without its "(" yet is still a function reference,
       // not a subscripted variable - render it the same way a finished call would (see
@@ -391,21 +396,21 @@ function renderCall(node) {
 
   if (lname === 'sqrt') return `\\sqrt{${a(0)}}`;
   if (lname === 'abs') return `\\left|${a(0)}\\right|`;
-  if (lname === 'exp') return `e^{${a(0)}}`;
+  if (lname === 'exp') return `\\mathrm{e}^{${a(0)}}`;
   if (lname === 'ln') return `\\ln${primes}\\left(${a(0)}\\right)`;
   if (lname === 'log') return has(1) ? `\\log_{${a(1)}}${primes}\\left(${a(0)}\\right)` : `\\log${primes}\\left(${a(0)}\\right)`;
   if (TRIG[lname]) return `${TRIG[lname]}${primes}\\left(${a(0)}\\right)`;
 
   if (lname === 'integrate' || lname === 'int') {
-    if (has(3)) return `\\int_{${a(2)}}^{${a(3)}} ${a(0)}\\;d${a(1) || 'x'}`;
-    if (has(1)) return `\\int ${a(0)}\\;d${a(1) || 'x'}`;
-    return `\\int ${a(0)}\\;dx`;
+    if (has(3)) return `\\int_{${a(2)}}^{${a(3)}} ${a(0)}\\;\\mathrm{d}${a(1) || 'x'}`;
+    if (has(1)) return `\\int ${a(0)}\\;\\mathrm{d}${a(1) || 'x'}`;
+    return `\\int ${a(0)}\\;\\mathrm{d}x`;
   }
 
   if (lname === 'diff' || lname === 'derive') {
     const v = a(1) || 'x';
-    if (has(2)) return `\\frac{d^{${a(2)}}}{d${v}^{${a(2)}}}\\left(${a(0)}\\right)`;
-    return `\\frac{d}{d${v}}\\left(${a(0)}\\right)`;
+    if (has(2)) return `\\frac{\\mathrm{d}^{${a(2)}}}{\\mathrm{d}${v}^{${a(2)}}}\\left(${a(0)}\\right)`;
+    return `\\frac{\\mathrm{d}}{\\mathrm{d}${v}}\\left(${a(0)}\\right)`;
   }
 
   if (lname === 'limit') {

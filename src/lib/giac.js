@@ -526,6 +526,33 @@ function parseSolveVarList(sentExpr) {
   return vars.length === 1 || SYSTEM_CAPABLE_COMMANDS.has(name) ? vars : null;
 }
 
+// True when `sentExpr` (the exact string just sent to the engine) is a bare top-level call to
+// integrate()/int() with no integration bounds - integrate(f), integrate(f,x) - i.e. an
+// indefinite integral, whose result is an antiderivative that's only unique up to an additive
+// constant, unlike integrate(f,x,a,b)'s definite (4-argument) form. Used to append "+C" to the
+// *rendered* LaTeX only (see evaluate()/evaluateApprox()) - Giac's own output never includes an
+// arbitrary constant, and `raw`/`text` are left untouched since those are what gets
+// copied/reinserted (see reinsertableValue in historyEntry.js).
+const INTEGRATE_NAME_RE = /^(integrate|int)$/i;
+
+function isIndefiniteIntegral(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
+  if (!nameMatch || !body.endsWith(')') || !INTEGRATE_NAME_RE.test(nameMatch[1])) return false;
+  const openIdx = nameMatch[0].length - 1;
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return false;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',');
+  return args.length === 1 || args.length === 2;
+}
+
+// Appends "+C" to a rendered LaTeX antiderivative - "\\int ... dx" style spacing isn't in play
+// here (this runs on the *result*, not the integral notation itself), so a plain textual
+// append is enough; skipped when there's no LaTeX to append to (e.g. fetchLatex failed).
+function appendArbitraryConstant(latex) {
+  return latex == null ? latex : `${latex}+C`;
+}
+
 // Strips as many layers of a fully-enclosing, matched outer "(...)" pair as `s` has - used
 // below (see normalizeSolutionValue) because Giac sometimes wraps a whole conjunction of
 // relations in its own redundant outer parens (e.g. "((x>5) and (x<10))" for
@@ -757,6 +784,32 @@ function fixScientificNotation(latex) {
   return latex.replace(SCI_NOTATION_RE, (_, mantissa, exponent) => sciLatex(mantissa, parseInt(exponent, 10)));
 }
 
+// Giac's own latex() always renders Euler's number as a bare, italic "e" - typically as the
+// base of a power, even for a bare "e" on its own (which Giac evaluates to "exp(1)", latex'd
+// as "e^{1}") - indistinguishable from an italic variable named "e" (which Giac doesn't
+// otherwise produce - see above, it always resolves a bare "e" to exp(1) first). Standard
+// math typography sets the constant upright instead, so rewrite every such token to
+// "\mathrm{e}". Scoped to "e" immediately followed by "^" (matches every shape Giac's own
+// latex() actually emits - see the fixScientificNotation comment above) and bounded by a word
+// boundary so it never touches an "e" that's part of a longer identifier (e.g. "\mathrm{Ei}"'s
+// capital "E", or "erf").
+const EULER_CONSTANT_RE = /\be(?=\^)/g;
+function fixEulerConstant(latex) {
+  return latex.replace(EULER_CONSTANT_RE, '\\mathrm{e}');
+}
+
+// Giac's own latex() for an integral it couldn't resolve to a closed form (e.g.
+// "integrate(exp(sin(x)),x)") echoes the integral notation itself, "\int e^{\sin(x)}\, dx" -
+// the trailing differential's "d" is bare/italic, same typographic issue as Euler's constant
+// above. Scoped to a "d" right after Giac's own "\, " separator (the only place its latex()
+// emits one) and followed by the integration variable (a plain letter, or a Greek letter's own
+// backslash command, e.g. "d\alpha") - never a stray "d" used as an ordinary identifier
+// elsewhere in the expression.
+const DIFFERENTIAL_D_RE = /(\\,\s*)d(?=[A-Za-z\\])/g;
+function fixDifferentialD(latex) {
+  return latex.replace(DIFFERENTIAL_D_RE, (_, pre) => `${pre}\\mathrm{d}`);
+}
+
 // How many digits (integer digits for a large number, or leading zeros past the point before
 // the first significant digit for a small one) an approximate result can show in full before
 // switching to scientific notation - e.g. 1234567 (7 digits) or 0.0000001 (first significant
@@ -858,14 +911,18 @@ async function fetchLatex(out) {
   // genuine LaTeX "\\" row-break (e.g. inside a matrix's \begin{array}{cc}...\end{array}),
   // so it must survive untouched; collapsing it to one (an earlier version of this code did)
   // corrupted every matrix/piecewise ("\begin{cases}") result into a single garbled row.
-  return fixScientificNotation(
-    stripQuotes(latexOut)
-      .replace(/\\"/g, '"')
-      // Giac's own latex() has a bug for squared trig functions: it emits e.g.
-      // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
-      // MathJax read it as the circumflex-accent command instead of a superscript.
-      // Drop that backslash so "\^{" renders as the intended "^{".
-      .replace(/\\\^\{/g, '^{'),
+  return fixDifferentialD(
+    fixEulerConstant(
+      fixScientificNotation(
+        stripQuotes(latexOut)
+          .replace(/\\"/g, '"')
+          // Giac's own latex() has a bug for squared trig functions: it emits e.g.
+          // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
+          // MathJax read it as the circumflex-accent command instead of a superscript.
+          // Drop that backslash so "\^{" renders as the intended "^{".
+          .replace(/\\\^\{/g, '^{'),
+      ),
+    ),
   );
 }
 
@@ -970,7 +1027,11 @@ export async function evaluate(expr, knownConstants) {
   }
 
   const simplifiedOut = await applyAutosimplify(out);
-  const latexOut = await fetchLatex(simplifiedOut);
+  let latexOut = await fetchLatex(simplifiedOut);
+  // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
+  // unevaluated (e.g. "integrate(exp(sin(x)),x)") - that's not a Stammfunktion, and the
+  // integral notation itself already stands for the whole family up to a constant.
+  if (isIndefiniteIntegral(sentExpr) && !isIndefiniteIntegral(simplifiedOut)) latexOut = appendArbitraryConstant(latexOut);
   return { raw: simplifiedOut, isError: false, text: simplifiedOut, latex: latexOut, isGraphics: false };
 }
 
@@ -1241,7 +1302,10 @@ export async function evaluateApprox(expr, knownConstants) {
   // rounded approximation regardless of formatApproxSci's own `rounded` flag - the "≈" prefix
   // below always applies.
   const approxSci = formatApproxSci(approxOut);
-  const latexOut = approxSci ? approxSci.latex : await fetchLatex(approxOut);
+  let latexOut = approxSci ? approxSci.latex : await fetchLatex(approxOut);
+  // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
+  // unevaluated - see the matching comment in evaluate() above.
+  if (isIndefiniteIntegral(normalized) && !isIndefiniteIntegral(out)) latexOut = appendArbitraryConstant(latexOut);
   return {
     raw: approxOut,
     isError: false,
