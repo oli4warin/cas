@@ -26,6 +26,7 @@ export const XCAS_COMMANDS = {
   exp: 'exponential function',
   ln: 'natural logarithm',
   log: 'logarithm',
+  logb: 'logarithm to an arbitrary base: logb(x,b)',
   log10: 'base-10 logarithm',
 
   // Algebra

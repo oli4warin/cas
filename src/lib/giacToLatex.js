@@ -34,7 +34,7 @@ const LOGICAL_WORDS = new Set(['and', 'or', 'xor']);
 
 const GREEK = {
   pi: '\\pi', theta: '\\theta', alpha: '\\alpha', beta: '\\beta', gamma: '\\gamma',
-  delta: '\\delta', lambda: '\\lambda', mu: '\\mu', sigma: '\\sigma', phi: '\\phi',
+  delta: '\\delta', lambda: '\\lambda', mu: '\\mu', sigma: '\\sigma', phi: '\\varphi',
   omega: '\\omega', infinity: '\\infty', inf: '\\infty', epsilon: '\\varepsilon',
 	kappa: '\\kappa', nu: '\\nu', tau: '\\tau', psi: '\\psi', chi: '\\chi'
 };
@@ -405,7 +405,7 @@ function renderCall(node) {
   if (lname === 'abs') return `\\left|${a(0)}\\right|`;
   if (lname === 'exp') return `\\mathrm{e}^{${a(0)}}`;
   if (lname === 'ln') return `\\ln${primes}\\left(${a(0)}\\right)`;
-  if (lname === 'log') return has(1) ? `\\log_{${a(1)}}${primes}\\left(${a(0)}\\right)` : `\\log${primes}\\left(${a(0)}\\right)`;
+  if (lname === 'log' || lname === 'logb') return has(1) ? `\\log_{${a(1)}}${primes}\\left(${a(0)}\\right)` : `\\log${primes}\\left(${a(0)}\\right)`;
   if (TRIG[lname]) return `${TRIG[lname]}${primes}\\left(${a(0)}\\right)`;
 
   if (lname === 'integrate' || lname === 'int') {

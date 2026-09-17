@@ -16,6 +16,7 @@ let worker = null;
 let readyPromise = null;
 let readyResolve = null;
 let readyReject = null;
+let preludeSent = false;
 let nextId = 1;
 // Requests currently in flight, keyed by id. The worker only ever runs one `caseval` at a
 // time and replies strictly in the order requests were posted, so several callers can
@@ -27,6 +28,7 @@ const pending = new Map(); // id -> { resolve, timer }
 function spawnWorker() {
   const w = new Worker(WORKER_URL);
   worker = w;
+  preludeSent = false;
   readyPromise = new Promise((resolve, reject) => {
     readyResolve = resolve;
     readyReject = reject;
@@ -51,8 +53,20 @@ function spawnWorker() {
   };
 }
 
+// Constants Giac doesn't already provide natively - just `tau` (2*pi) so far - defined once
+// per worker instance right after the engine finishes loading, and before any real request
+// can reach it (see ensureGiacLoaded below): both callers attach their `.then` to the same
+// readyPromise, in this attachment order, and the worker runs messages strictly in the order
+// it receives them, so this is always the first `caseval` the engine sees. restart() spawns
+// a fresh engine with no memory of it, hence resetting preludeSent there.
+const PRELUDE_EXPR = 'tau:=2*pi;';
+
 export function ensureGiacLoaded() {
   if (!worker) spawnWorker();
+  if (!preludeSent) {
+    preludeSent = true;
+    readyPromise.then(() => postEval(PRELUDE_EXPR));
+  }
   return readyPromise;
 }
 
@@ -80,20 +94,21 @@ export function cancelCurrentEval() {
   cancelAll('Cancelled.');
 }
 
+function postEval(expr) {
+  return new Promise((resolve) => {
+    const id = nextId++;
+    const timer = setTimeout(() => {
+      if (pending.has(id)) {
+        cancelAll('This expression took too long to evaluate and was cancelled.');
+      }
+    }, EVAL_TIMEOUT_MS);
+    pending.set(id, { resolve, timer });
+    worker.postMessage({ type: 'eval', id, expr });
+  });
+}
+
 function rawEvalAsync(expr) {
-  return ensureGiacLoaded().then(
-    () =>
-      new Promise((resolve) => {
-        const id = nextId++;
-        const timer = setTimeout(() => {
-          if (pending.has(id)) {
-            cancelAll('This expression took too long to evaluate and was cancelled.');
-          }
-        }, EVAL_TIMEOUT_MS);
-        pending.set(id, { resolve, timer });
-        worker.postMessage({ type: 'eval', id, expr });
-      }),
-  );
+  return ensureGiacLoaded().then(() => postEval(expr));
 }
 
 const TRAILING_OPERATOR_RE = /[+\-*/^,.=<>]$/;
@@ -437,7 +452,7 @@ function splitTopLevelKeyword(s, word) {
 // themselves "the unknown" - `and`-joining equations for solve(), or names like `pi`/`i`
 // that already have a fixed meaning to Giac.
 const EQUATION_KEYWORDS = new Set(['and', 'or', 'not', 'xor', 'true', 'false']);
-const BUILTIN_CONSTANT_NAMES = new Set(['pi', 'e', 'i', 'inf', 'infinity', 'euler_gamma']);
+const BUILTIN_CONSTANT_NAMES = new Set(['pi', 'e', 'i', 'inf', 'infinity', 'euler_gamma', 'tau']);
 const FREE_VAR_IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
 
 // Collects the identifiers in `s` that stand for an unknown to solve for, in first-appearance

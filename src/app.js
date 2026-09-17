@@ -111,6 +111,7 @@ const TOOLBAR_GROUPS = [
     col: 'left',
     items: [
       { label: 'π', prefix: 'pi', wrap: false },
+      { label: 'τ', prefix: 'tau', wrap: false },
       { label: 'e', prefix: 'e', wrap: false },
     ],
   },
@@ -132,6 +133,7 @@ const TOOLBAR_GROUPS = [
     items: [
       { label: 'ln', prefix: 'ln(', suffix: ')' },
       { label: 'log', prefix: 'log(', suffix: ')' },
+      { label: 'logₐ', prefix: 'logb(', suffix: ')' },
     ],
   },
   {
