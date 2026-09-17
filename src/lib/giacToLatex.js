@@ -252,7 +252,11 @@ function makeParser(tokens) {
     return { type: 'text', value: tok.value };
   }
 
-  return { parseExpression };
+  return {
+    parseExpression,
+    peekComma: () => { const tok = peek(); return !!tok && tok.type === 'op' && tok.value === ','; },
+    nextToken: next,
+  };
 }
 
 function escapeText(s) {
@@ -436,8 +440,14 @@ export function giacToLatex(src) {
   try {
     const tokens = tokenize(src);
     const parser = makeParser(tokens);
-    const ast = parser.parseExpression(0);
-    return render(ast);
+    // Top level allows comma-separated sequences too, e.g. "a,b:=[1,2]" or "1,2,3" -
+    // parseExpression() alone stops at the first comma since ',' isn't an infix operator.
+    const parts = [parser.parseExpression(0)];
+    while (parser.peekComma()) {
+      parser.nextToken();
+      parts.push(parser.parseExpression(0));
+    }
+    return parts.map(render).join(',\\ ');
   } catch {
     return null;
   }
