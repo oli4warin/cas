@@ -52,6 +52,24 @@ function getInitialShowText() {
   }
 }
 
+// Off by default - the symbol toolbar and keyboard-shortcut hints are a beginner aid, not
+// something every session needs taking up screen space. Toggled via the small buttons next
+// to each (see setToolbarVisible/setHintsVisible below) and remembered per browser.
+function getInitialToolbarVisible() {
+  try {
+    return localStorage.getItem('toolbarVisible') === '1';
+  } catch {
+    return false;
+  }
+}
+function getInitialHintsVisible() {
+  try {
+    return localStorage.getItem('hintsVisible') === '1';
+  } catch {
+    return false;
+  }
+}
+
 // Flattens history into a single up/down browsing order: most recent output first, then
 // that same entry's input, then the previous entry's output, and so on. An entry that
 // errored has no reinsertable output, so only its input step is included.
@@ -107,6 +125,8 @@ export function mountApp(root) {
     autosimplify: 2, // 0=none, 1=regroup, 2=simplify - matches evaluate()'s own default in giac.js
     theme: getInitialTheme(),
     showText: getInitialShowText(),
+    toolbarVisible: getInitialToolbarVisible(),
+    hintsVisible: getInitialHintsVisible(),
   };
 
   const sessionId = makeSessionId();
@@ -195,6 +215,12 @@ export function mountApp(root) {
     { class: 'toolbar' },
     TOOLBAR.map((t) => h('button', { type: 'button', class: 'toolbar__btn', onclick: () => insertSnippet(t.prefix, t.suffix) }, t.label)),
   );
+  const toolbarToggle = h(
+    'button',
+    { type: 'button', class: 'bar-toggle', onclick: () => setToolbarVisible(!state.toolbarVisible) },
+    '',
+  );
+  const toolbarWrap = h('div', { class: 'bar-toggle-row' }, toolbarToggle);
 
   const warningBar = h('div', { class: 'warning-bar' });
   warningBar.style.display = 'none';
@@ -213,6 +239,12 @@ export function mountApp(root) {
     h('span', null, 'Backspace on a selected entry deletes it'),
     h('span', null, 'Alt+P plot · Alt+T table'),
   );
+  const hintsToggle = h(
+    'button',
+    { type: 'button', class: 'bar-toggle', onclick: () => setHintsVisible(!state.hintsVisible) },
+    '',
+  );
+  const hintsWrap = h('div', { class: 'bar-toggle-row' }, hintsToggle);
 
   const appColumn = h(
     'div',
@@ -221,11 +253,36 @@ export function mountApp(root) {
     historyList,
     previewWrap,
     inputRow,
+    toolbarWrap,
     toolbar,
     warningBar,
+    hintsWrap,
     hintBar,
     Credits(),
   );
+
+  function setToolbarVisible(visible) {
+    state.toolbarVisible = visible;
+    toolbar.style.display = visible ? '' : 'none';
+    toolbarToggle.textContent = visible ? 'Hide symbol buttons ▲' : 'Show symbol buttons ▼';
+    try {
+      localStorage.setItem('toolbarVisible', visible ? '1' : '0');
+    } catch {
+      // ignore - see getInitialShowText for why storage can throw.
+    }
+  }
+  function setHintsVisible(visible) {
+    state.hintsVisible = visible;
+    hintBar.style.display = visible ? '' : 'none';
+    hintsToggle.textContent = visible ? 'Hide keyboard hints ▲' : 'Show keyboard hints ▼';
+    try {
+      localStorage.setItem('hintsVisible', visible ? '1' : '0');
+    } catch {
+      // ignore - see getInitialShowText for why storage can throw.
+    }
+  }
+  setToolbarVisible(state.toolbarVisible);
+  setHintsVisible(state.hintsVisible);
 
   const calcColumn = h('div', { class: 'layout__calc' }, appColumn);
 

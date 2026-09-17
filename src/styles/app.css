@@ -473,6 +473,29 @@
   opacity: 0.85;
 }
 
+.bar-toggle-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.bar-toggle {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  opacity: 0.6;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bar-toggle:hover {
+  opacity: 1;
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -711,6 +734,7 @@
   .layout__side,
   .header__actions,
   .toolbar,
+  .bar-toggle-row,
   .formula-preview,
   .input-row,
   .warning-bar,

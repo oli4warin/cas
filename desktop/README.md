@@ -29,10 +29,16 @@ Output lands in `dist/`. See `package.json`'s `build` key for per-platform targe
   main window and the pop-out plot window all need a real origin, not bare `file://`), so it
   starts a small static file server on `127.0.0.1` at a random free port and loads the app
   from there.
-- `vendor/mathjax/tex-mml-chtml.js` is a pinned copy of the same MathJax build the site loads
-  from jsDelivr (`mathjax@3/es5/tex-mml-chtml.js`), vendored so the app works with no network
-  connection. Update it by re-downloading that URL when the site's own script tag in
-  `../index.html` changes to point at a newer version.
+- `vendor/mathjax/tex-svg.js` is a pinned copy of MathJax's SVG combined component (from
+  jsDelivr, `mathjax@3/es5/tex-svg.js`), vendored so the app works with no network connection.
+  It's the SVG output component rather than a straight copy of the site's own CHTML one
+  (`tex-mml-chtml.js`) because CHTML loads its glyphs from external woff font files at a path
+  relative to the script - fine on the hosted site (resolved against the jsDelivr CDN), but
+  those files aren't vendored here, so offline it silently fell back to a system font with
+  mismatched metrics (e.g. a radical sign's bar not lining up with the sign itself). SVG draws
+  every glyph as inline paths embedded in the bundle, so it needs no font files at all. Update
+  it by re-downloading `https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js` when the site's
+  own script tag in `../index.html` changes to point at a newer MathJax version.
 
 `app/` and `dist/` are both generated and gitignored - only `main.js`, `build.js`,
 `package.json`, and `vendor/` are checked in.
