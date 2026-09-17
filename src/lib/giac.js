@@ -386,6 +386,25 @@ function hasTopLevelRelation(s) {
   return splitTopLevelKeyword(s, 'and').length > 1 || splitTopLevelKeyword(s, 'or').length > 1;
 }
 
+// True iff `s` has a top-level "|" outside any (), [], {} nesting - Giac's own "evaluate
+// at"/substitution operator, e.g. "2*x+1|x=7" (giac substitutes x=7 and returns 15 directly,
+// no subst() call needed) or "x+y|x=1,y=2" for several variables at once. A bare `var=value`
+// after such a "|" is part of that substitution, not a separate equation to solve - without
+// this check, hasTopLevelRelation above would spot that "=" and wrapBareEquation below would
+// wrap the whole thing as `solve(2*x+1|x=7,x)`, which is a different (and broken) computation
+// than what the user typed. A "|" nested inside a call the user already wrote themselves (e.g.
+// `solve(x^2=1|x>0,x)`) sits at depth > 0 and is untouched by this.
+function hasTopLevelPipe(s) {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === '|' && depth === 0) return true;
+  }
+  return false;
+}
+
 // Splits `s` on a keyword (e.g. "and") only where the match is a whole word (not part of a
 // longer identifier) sitting outside any ()/[]/{} nesting - mirrors splitTopLevel above, but
 // for a word separator like Xcas's `eq1 and eq2` (rather than a single punctuation char).
@@ -506,6 +525,7 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
   const hasSemi = s.endsWith(';');
   const body = hasSemi ? s.slice(0, -1) : s;
   if (!body) return expr;
+  if (hasTopLevelPipe(body)) return expr;
 
   let equationsText = null;
   let equationParts = null;
