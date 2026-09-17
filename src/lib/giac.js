@@ -241,6 +241,92 @@ function splitTopLevel(s, sep) {
   return parts;
 }
 
+// Splits `s` on its own top-level '+'/'-' operators, keeping each term's own leading sign
+// attached (e.g. "a-b+c" -> ["a", "-b", "+c"]). A '+'/'-' only counts as a split point when
+// it's acting as a binary operator - i.e. the previous character can end a term (a digit,
+// letter, '.', ')', ']' or '}') - so a unary sign at the very start, or right after another
+// operator/opening delimiter ('*','/','^','+','-','(','[','{',','), stays attached to what
+// follows instead (e.g. "x^-2+1" splits as ["x^-2", "+1"], not ["x^", "-2", "+1"]). A '-'/'+'
+// that's part of scientific notation ("1.5e-3") is likewise left attached to its mantissa.
+function splitTopLevelTerms(s) {
+  const terms = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (depth === 0 && (c === '+' || c === '-')) {
+      const prev = s[i - 1];
+      const isSciExponent = (prev === 'e' || prev === 'E') && /[0-9.]/.test(s[i - 2] ?? '');
+      if (prev !== undefined && !isSciExponent && /[A-Za-z0-9_.)\]}]/.test(prev)) {
+        terms.push(s.slice(start, i));
+        start = i;
+      }
+    }
+  }
+  terms.push(s.slice(start));
+  return terms;
+}
+
+// True for a term that's a bare numeric constant (an integer, decimal, or simple fraction,
+// with an optional leading sign) and nothing else - "-3", "1/2", "0.25", but not "2*x" or
+// "sqrt(5)".
+function isNumericConstantTerm(term) {
+  return /^[+-]?\d+(\.\d+)?(\/\d+)?$/.test(term);
+}
+
+// True for a term that's a single radical - "sqrt(5)", "-sqrt(2)", "2*sqrt(5)" - and nothing
+// beyond it (not "sqrt(2)*sqrt(3)" or "sqrt(5)+1", which have more going on than one plain
+// surd). Scoped this narrowly - rather than "any non-numeric term" - so an ordinary sum with
+// a variable is never touched by reorderConstantRadicalSum below: "x+1" must stay "x+1", not
+// become "1+x".
+function isPureRadicalTerm(term) {
+  const s = term[0] === '+' || term[0] === '-' ? term.slice(1) : term;
+  const m = /^(?:\d+(?:\.\d+)?\*)?sqrt\(/.exec(s);
+  if (!m) return false;
+  const openIdx = s.indexOf('(');
+  return findMatchingParen(s, openIdx) === s.length - 1;
+}
+
+// Rewrites a giac-syntax sum so a bare numeric constant sits before a lone radical term -
+// "sqrt(5)+1" becomes "1+sqrt(5)", "-sqrt(5)+1" becomes "1-sqrt(5)" - matching how these are
+// conventionally written by hand (e.g. the golden ratio as "(1+sqrt(5))/2", not
+// "(sqrt(5)+1)/2", which is what Giac itself returns). Recurses into every
+// parenthesized/bracketed subexpression first, so the same reordering reaches nested sums too
+// - inside a product like "2*(1+sqrt(5))", or a solve() result buried in a list. Only the
+// specific two-term "one constant + one lone radical" shape is reordered; anything else (no
+// constant term, more than one of either, a third term, a variable) is left exactly as Giac
+// gave it.
+function reorderConstantRadicalSum(s) {
+  let rebuilt = '';
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '(' || c === '[') {
+      const close = c === '(' ? findMatchingParen(s, i) : findMatchingBracket(s, i);
+      if (close === -1) {
+        rebuilt += s.slice(i);
+        break;
+      }
+      rebuilt += c + reorderConstantRadicalSum(s.slice(i + 1, close)) + s[close];
+      i = close + 1;
+    } else {
+      rebuilt += c;
+      i++;
+    }
+  }
+  s = rebuilt;
+
+  const terms = splitTopLevelTerms(s);
+  if (terms.length !== 2) return s;
+  const [a, b] = terms;
+  const [constant, radical] = isNumericConstantTerm(a) && isPureRadicalTerm(b) ? [a, b] : isNumericConstantTerm(b) && isPureRadicalTerm(a) ? [b, a] : [];
+  if (!constant) return s;
+
+  return constant.replace(/^\+/, '') + (/^[+-]/.test(radical) ? radical : `+${radical}`);
+}
+
 // Giac's own matrix literal syntax is nested brackets, "[[1,2],[3,4]]" - it doesn't
 // understand the TI-Nspire shorthand "[1,2;3,4]" (semicolons as row separators) at all, so
 // this expands that shorthand into Giac's own form before anything reaches the engine.
@@ -573,7 +659,7 @@ function stripRedundantOuterParens(s) {
 // relation keeps its own parens; only the single redundant pair around the whole thing goes.
 function normalizeSolutionValue(value) {
   const stripped = stripRedundantOuterParens(value);
-  return stripped !== value && hasTopLevelRelation(stripped) ? stripped : value;
+  return reorderConstantRadicalSum(stripped !== value && hasTopLevelRelation(stripped) ? stripped : value);
 }
 
 // Turns a solve-like call's raw result - solve/csolve's own "list[[v1,v2],[v1,v2],...]" (each
@@ -714,6 +800,7 @@ function parseDesolveFuncName(sentExpr) {
 // back out (see historyEntry.js) reinserts just the expression, not "y=" along with it.
 function formatDesolveResult(raw, funcName) {
   if (!funcName) return null;
+  raw = reorderConstantRadicalSum(raw);
   const clause = `${funcName}=${raw}`;
   return { text: clause, latex: giacToLatex(clause) || null, raw };
 }
@@ -902,6 +989,49 @@ function exactNumberResult(str) {
   return { raw: str, isError: false, text: str, latex: sci ? sci.latex : str, isGraphics: false };
 }
 
+// Giac's own latex() wraps a sqrt() in a redundant "\left(...\right)" pair whenever it's
+// being subtracted (e.g. "1-sqrt(5)" -> "1-\left(\sqrt{5}\right)"), though the very same
+// sqrt() latexes as plain "\sqrt{5}" when it isn't preceded by a minus sign (e.g.
+// "sqrt(5)-1" -> "\sqrt{5}-1"). Giac's own term order never actually triggers this itself -
+// it always puts a subtracted sqrt() first (negated), never after a leading term - but
+// reorderConstantRadicalSum above does exactly that by design, so this strips the redundant
+// wrapping back off wherever it shows up. Scans by hand (rather than a regex) so a radicand
+// with its own braces (e.g. "\sqrt{\frac{1}{2}}") is still matched up correctly.
+function fixNegatedSqrtParens(latex) {
+  const NEEDLE = '-\\left(\\sqrt{';
+  const CLOSE = '\\right)';
+  let out = '';
+  let i = 0;
+  while (i < latex.length) {
+    const idx = latex.indexOf(NEEDLE, i);
+    if (idx === -1) {
+      out += latex.slice(i);
+      break;
+    }
+    out += latex.slice(i, idx);
+    const braceStart = idx + NEEDLE.length - 1; // the sqrt argument's own opening '{'
+    let depth = 0;
+    let j = braceStart;
+    for (; j < latex.length; j++) {
+      if (latex[j] === '{') depth++;
+      else if (latex[j] === '}') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth === 0 && latex.startsWith(CLOSE, j + 1)) {
+      out += '-\\sqrt' + latex.slice(braceStart, j + 1);
+      i = j + 1 + CLOSE.length;
+    } else {
+      // Not actually the shape expected (unbalanced braces, or no matching "\right)"
+      // immediately after) - leave it untouched rather than risk corrupting it.
+      out += latex[idx];
+      i = idx + 1;
+    }
+  }
+  return out;
+}
+
 // Fetches LaTeX for an already-evaluated Giac output string. Returns null if Giac can't
 // latex() it (e.g. it's not a re-parseable value).
 async function fetchLatex(out) {
@@ -911,16 +1041,18 @@ async function fetchLatex(out) {
   // genuine LaTeX "\\" row-break (e.g. inside a matrix's \begin{array}{cc}...\end{array}),
   // so it must survive untouched; collapsing it to one (an earlier version of this code did)
   // corrupted every matrix/piecewise ("\begin{cases}") result into a single garbled row.
-  return fixDifferentialD(
-    fixEulerConstant(
-      fixScientificNotation(
-        stripQuotes(latexOut)
-          .replace(/\\"/g, '"')
-          // Giac's own latex() has a bug for squared trig functions: it emits e.g.
-          // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
-          // MathJax read it as the circumflex-accent command instead of a superscript.
-          // Drop that backslash so "\^{" renders as the intended "^{".
-          .replace(/\\\^\{/g, '^{'),
+  return fixNegatedSqrtParens(
+    fixDifferentialD(
+      fixEulerConstant(
+        fixScientificNotation(
+          stripQuotes(latexOut)
+            .replace(/\\"/g, '"')
+            // Giac's own latex() has a bug for squared trig functions: it emits e.g.
+            // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
+            // MathJax read it as the circumflex-accent command instead of a superscript.
+            // Drop that backslash so "\^{" renders as the intended "^{".
+            .replace(/\\\^\{/g, '^{'),
+        ),
       ),
     ),
   );
@@ -965,7 +1097,8 @@ export async function evaluate(expr, knownConstants) {
   // all - both are shown as "≈"/dropped rather than "=".
   const tailMatch = out.match(EXACT_DECIMAL_TAIL_RE);
   if (tailMatch) {
-    const [, exactPart, decimalPart] = tailMatch;
+    const [, exactPartRaw, decimalPart] = tailMatch;
+    const exactPart = reorderConstantRadicalSum(exactPartRaw);
     if (parseDecimal(decimalPart) == null) {
       // Giac's own preview overflowed to "infinity"/"undef" - it carries no information, so
       // drop it and just show the exact value.
@@ -1026,7 +1159,7 @@ export async function evaluate(expr, knownConstants) {
     return { raw: desolved.raw, isError: false, text: desolved.text, latex: desolved.latex, isGraphics: false };
   }
 
-  const simplifiedOut = await applyAutosimplify(out);
+  const simplifiedOut = reorderConstantRadicalSum(await applyAutosimplify(out));
   let latexOut = await fetchLatex(simplifiedOut);
   // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
   // unevaluated (e.g. "integrate(exp(sin(x)),x)") - that's not a Stammfunktion, and the
