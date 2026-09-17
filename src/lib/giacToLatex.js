@@ -35,7 +35,8 @@ const LOGICAL_WORDS = new Set(['and', 'or', 'xor']);
 const GREEK = {
   pi: '\\pi', theta: '\\theta', alpha: '\\alpha', beta: '\\beta', gamma: '\\gamma',
   delta: '\\delta', lambda: '\\lambda', mu: '\\mu', sigma: '\\sigma', phi: '\\phi',
-  omega: '\\omega', infinity: '\\infty', inf: '\\infty',
+  omega: '\\omega', infinity: '\\infty', inf: '\\infty', epsilon: '\\varepsilon',
+	kappa: '\\kappa', nu: '\\nu', tau: '\\tau', psi: '\\psi', chi: '\\chi'
 };
 
 const TRIG = {
