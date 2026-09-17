@@ -1,0 +1,39 @@
+{
+  "name": "calculator-desktop",
+  "productName": "Calculator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline desktop build of the Calculator web app (Xcas/Giac CAS)",
+  "main": "main.js",
+  "scripts": {
+    "build": "node build.js",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "ch.oli4warin.cas.calculator",
+    "productName": "Calculator",
+    "files": [
+      "main.js",
+      "app/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Education"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": ["nsis"]
+    }
+  }
+}
