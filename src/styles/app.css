@@ -476,6 +476,7 @@
 .bar-toggle-row {
   display: flex;
   justify-content: center;
+  gap: 8px;
   margin-top: 10px;
 }
 

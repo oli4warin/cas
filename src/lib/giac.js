@@ -905,6 +905,19 @@ function fixEulerConstant(latex) {
   return latex.replace(EULER_CONSTANT_RE, '\\mathrm{e}');
 }
 
+// Same typographic fix as fixEulerConstant, for the imaginary unit: Giac's own latex()
+// always renders it as a bare, italic "i" (e.g. "3+4\cdot i", "\sqrt{i}", "i+1"), which reads
+// as an ordinary variable rather than the constant. Word-bounded so it only ever catches a
+// standalone "i" token - never the "i" inside a longer command/identifier Giac's latex()
+// emits, e.g. "\sin", "\xi", "\mathrm{hi}" (confirmed against the actual engine: in every
+// such case "i" sits next to another word character on at least one side, so \b doesn't
+// match there) - and case-sensitive, since Giac treats uppercase "I" as a distinct, ordinary
+// free variable rather than the imaginary unit (also confirmed against the engine).
+const IMAGINARY_UNIT_RE = /\bi\b/g;
+function fixImaginaryUnit(latex) {
+  return latex.replace(IMAGINARY_UNIT_RE, '\\mathrm{i}');
+}
+
 // Giac's own latex() for an integral it couldn't resolve to a closed form (e.g.
 // "integrate(exp(sin(x)),x)") echoes the integral notation itself, "\int e^{\sin(x)}\, dx" -
 // the trailing differential's "d" is bare/italic, same typographic issue as Euler's constant
@@ -1063,15 +1076,17 @@ async function fetchLatex(out) {
   // corrupted every matrix/piecewise ("\begin{cases}") result into a single garbled row.
   return fixNegatedSqrtParens(
     fixDifferentialD(
-      fixEulerConstant(
-        fixScientificNotation(
-          stripQuotes(latexOut)
-            .replace(/\\"/g, '"')
-            // Giac's own latex() has a bug for squared trig functions: it emits e.g.
-            // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
-            // MathJax read it as the circumflex-accent command instead of a superscript.
-            // Drop that backslash so "\^{" renders as the intended "^{".
-            .replace(/\\\^\{/g, '^{'),
+      fixImaginaryUnit(
+        fixEulerConstant(
+          fixScientificNotation(
+            stripQuotes(latexOut)
+              .replace(/\\"/g, '"')
+              // Giac's own latex() has a bug for squared trig functions: it emits e.g.
+              // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
+              // MathJax read it as the circumflex-accent command instead of a superscript.
+              // Drop that backslash so "\^{" renders as the intended "^{".
+              .replace(/\\\^\{/g, '^{'),
+          ),
         ),
       ),
     ),

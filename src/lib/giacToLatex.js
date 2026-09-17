@@ -318,6 +318,12 @@ function render(node) {
       // variable, even though Giac itself never actually lets "e" be one (a bare "e" always
       // evaluates to exp(1)).
       if (lname === 'e') return '\\mathrm{e}' + primes;
+      // The imaginary unit is set upright too, same convention as Giac's own latex() (see
+      // fixImaginaryUnit in lib/giac.js). Checked case-sensitively (unlike "e" above) because
+      // Giac itself is case-sensitive here: "i" is always the imaginary unit, but "I" is an
+      // ordinary, independent free variable (confirmed against the actual engine) - so only
+      // a literal lowercase "i" should render as the constant.
+      if (node.name === 'i') return '\\mathrm{i}' + primes;
       // A known command name (or one of its aliases, e.g. "normal_cdf" for "normald_cdf" -
       // see XCAS_COMMAND_ALIASES) typed without its "(" yet is still a function reference,
       // not a subscripted variable - render it the same way a finished call would (see

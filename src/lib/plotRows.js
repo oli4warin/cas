@@ -20,5 +20,6 @@ export function makeRow() {
     tmin: DEFAULT_TMIN,
     tmax: DEFAULT_TMAX,
     visible: true,
+    color: null, // null = use the palette default for this row's position (see COLORS in plotPanel.js)
   };
 }

@@ -364,7 +364,6 @@ export function mountApp(root) {
     { type: 'button', class: 'bar-toggle', onclick: () => setToolbarVisible(!state.toolbarVisible) },
     '',
   );
-  const toolbarWrap = h('div', { class: 'bar-toggle-row' }, toolbarToggle);
 
   const warningBar = h('div', { class: 'warning-bar' });
   warningBar.style.display = 'none';
@@ -388,7 +387,10 @@ export function mountApp(root) {
     { type: 'button', class: 'bar-toggle', onclick: () => setHintsVisible(!state.hintsVisible) },
     '',
   );
-  const hintsWrap = h('div', { class: 'bar-toggle-row' }, hintsToggle);
+  // Both toggles share one row (rather than each getting its own bar-toggle-row above the
+  // section it controls) so that collapsing both the math keyboard and the hints - the
+  // common "just give me the input" state - leaves only a single slim row, not two.
+  const togglesWrap = h('div', { class: 'bar-toggle-row' }, toolbarToggle, hintsToggle);
 
   const appColumn = h(
     'div',
@@ -397,10 +399,9 @@ export function mountApp(root) {
     historyList,
     previewWrap,
     inputRow,
-    toolbarWrap,
+    togglesWrap,
     toolbar,
     warningBar,
-    hintsWrap,
     hintBar,
     Credits(),
   );

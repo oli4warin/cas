@@ -8,6 +8,12 @@ import { FormulaPreview } from './formulaPreview.js';
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
 const SAMPLE_DEBOUNCE_MS = 150;
 
+// A row's curve color: whatever the user picked manually, or - same as before that was
+// possible - the palette color for its position.
+function rowColor(row, index) {
+  return row.color || COLORS[index % COLORS.length];
+}
+
 // The text fields a row has, in the order you'd naturally tab through them - used both to
 // find a row's "is it empty" field and to know where Enter should go next (see
 // handleFieldKeyDown).
@@ -163,14 +169,19 @@ function draw(canvas, rawView, curves, aspectLocked) {
 // One plot row's DOM, built once and reconciled in place on every update() - this is what
 // keeps a focused input field from losing focus (and its caret position) on every
 // keystroke, the way a naive full-teardown-and-rebuild would.
-function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocus, onTChange, onToggle, onRemove }) {
+function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocus, onTChange, onToggle, onColorChange, onRemove }) {
   let currentMode = null;
   const fieldEls = {};
   const previews = {};
   let tminEl = null;
   let tmaxEl = null;
 
-  const swatch = h('span', { class: 'plot-row__swatch' });
+  const swatch = h('input', {
+    type: 'color',
+    class: 'plot-row__swatch',
+    title: 'Curve color',
+    onchange: (e) => onColorChange(e.target.value),
+  });
   const modeSelect = h(
     'select',
     { class: 'plot-row__modeSelect', title: 'Plot type', onchange: (e) => onModeChange(e.target.value) },
@@ -240,7 +251,8 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
   }
 
   function update(row, index, errorMessage) {
-    swatch.style.background = COLORS[index % COLORS.length];
+    const color = rowColor(row, index);
+    if (swatch.value !== color) swatch.value = color;
     if (modeSelect.value !== row.mode) modeSelect.value = row.mode;
 
     if (row.mode !== currentMode) {
@@ -427,6 +439,23 @@ export function PlotPanel({
     emitRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
+  // Visibility and color are purely draw-time concerns - the curve's sampled points don't
+  // change - so unlike updateRow() these redraw straight from what's already in `curves`
+  // instead of going through emitRows()/scheduleResample(), which would debounce a fresh
+  // round trip to the Giac engine *for every row* before the canvas caught up. That made
+  // the show/hide toggle feel unreliable (occasionally needing the whole panel reopened to
+  // "unstick" it): toggling one row waited on every row's evaluation to finish, so a slow
+  // or queued-up request for an unrelated row could hold up a change that never needed the
+  // engine at all.
+  function setRowDrawOnly(id, patch) {
+    rows = rows.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    onRowsChange(rows);
+    renderRows();
+    redraw();
+  }
+  const toggleVisible = (id) => setRowDrawOnly(id, { visible: !rows.find((r) => r.id === id).visible });
+  const setColor = (id, color) => setRowDrawOnly(id, { color });
+
   function removeRow(id) {
     if (rows.length > 1) emitRows(rows.filter((r) => r.id !== id));
     delete curves[id];
@@ -471,7 +500,8 @@ export function PlotPanel({
             focused = { rowId: row.id, field };
           },
           onTChange: (which, value) => updateRow(row.id, { [which]: value }),
-          onToggle: () => updateRow(row.id, { visible: !row.visible }),
+          onToggle: () => toggleVisible(row.id),
+          onColorChange: (color) => setColor(row.id, color),
           onRemove: () => removeRow(row.id),
         });
         rowViews.set(row.id, view);
@@ -514,7 +544,7 @@ export function PlotPanel({
   function curveList() {
     return rows.map((row, i) => ({
       id: row.id,
-      color: COLORS[i % COLORS.length],
+      color: rowColor(row, i),
       visible: row.visible,
       points: curves[row.id]?.points,
       style: row.mode === 'scatter' ? 'points' : 'line',
