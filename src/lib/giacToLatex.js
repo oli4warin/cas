@@ -331,6 +331,17 @@ function render(node) {
       // renderCall's fallback below) so the \operatorname{} styling and underscore-escaping
       // apply as soon as the name is recognized, not only once "(" appears.
       if (XCAS_COMMANDS[lname] || XCAS_COMMAND_ALIASES[lname]) return operatorLabel(node.name) + primes;
+      // A greek letter with a solve()-style solution subscript (e.g. "lambda_1", see
+      // parseSolveSolutions in lib/giac.js) still needs its base rendered as the greek
+      // command - the plain lname check above only matches the unsubscripted name.
+      const idx = node.name.indexOf('_');
+      if (idx !== -1) {
+        const base = node.name.slice(0, idx).toLowerCase();
+        if (GREEK[base]) {
+          const sub = node.name.slice(idx + 1).replace(/_/g, '\\_');
+          return `${GREEK[base]}_{${sub}}` + primes;
+        }
+      }
       return renderVarName(node.name) + primes;
     }
     case 'text':
