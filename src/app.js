@@ -52,7 +52,7 @@ function getInitialShowText() {
   }
 }
 
-// Off by default - the symbol toolbar and keyboard-shortcut hints are a beginner aid, not
+// Off by default - the math keyboard and keyboard-shortcut hints are a beginner aid, not
 // something every session needs taking up screen space. Toggled via the small buttons next
 // to each (see setToolbarVisible/setHintsVisible below) and remembered per browser.
 function getInitialToolbarVisible() {
@@ -82,21 +82,112 @@ function buildHistorySteps(history) {
   return steps;
 }
 
-const TOOLBAR = [
-  { label: '√', prefix: 'sqrt(', suffix: ')' },
-  { label: 'x²', prefix: '^2', suffix: '' },
-  { label: 'xʸ', prefix: '^', suffix: '' },
-  { label: 'π', prefix: 'pi', suffix: '' },
-  { label: '∫', prefix: 'integrate(', suffix: ',x)' },
-  { label: 'd/dx', prefix: 'diff(', suffix: ',x)' },
-  { label: 'lim', prefix: 'limit(', suffix: ',x,0)' },
-  { label: 'Σ', prefix: 'sum(', suffix: ',x,1,10)' },
-  { label: 'solve', prefix: 'solve(', suffix: '=0,x)' },
-  { label: 'factor', prefix: 'factor(', suffix: ')' },
-  { label: 'expand', prefix: 'expand(', suffix: ')' },
-  { label: 'simplify', prefix: 'simplify(', suffix: ')' },
-  { label: 'abs', prefix: 'abs(', suffix: ')' },
-  { label: '( )', prefix: '(', suffix: ')' },
+// The math keyboard (see toolbar/toolbarWrap in mountApp), grouped so related buttons sit
+// together and share a color accent (see the toolbar__group--* rules in app.css) - purely a
+// visual grouping aid, it has no effect on insertion behavior. Each item's prefix/suffix are
+// inserted around the current selection (or just the cursor) - see insertSnippet - unless
+// `wrap: false`, which instead drops any selection and inserts `prefix` as plain typed text
+// (see insertPlain) - used for bare identifiers (variables, digits, operators, constants,
+// "=", ":=") where wrapping a selection would glue it onto the identifier instead of
+// replacing it. `col` sends the group to the left (functions/variables) or right (the
+// calculator keypad) column - see toolbar__col--* in app.css - loosely following the
+// functions-left/keypad-right split Qalculate's keyboard uses.
+const TOOLBAR_GROUPS = [
+  {
+    key: 'vars',
+    col: 'left',
+    items: [
+      { label: 'x', prefix: 'x', wrap: false },
+      { label: 'y', prefix: 'y', wrap: false },
+      { label: 't', prefix: 't', wrap: false },
+      { label: ':=', prefix: ':=', wrap: false },
+    ],
+  },
+  {
+    key: 'const',
+    col: 'left',
+    items: [
+      { label: 'π', prefix: 'pi', wrap: false },
+      { label: 'e', prefix: 'e', wrap: false },
+    ],
+  },
+  {
+    key: 'trig',
+    col: 'left',
+    items: [
+      { label: 'sin', prefix: 'sin(', suffix: ')' },
+      { label: 'cos', prefix: 'cos(', suffix: ')' },
+      { label: 'tan', prefix: 'tan(', suffix: ')' },
+      { label: 'asin', prefix: 'asin(', suffix: ')' },
+      { label: 'acos', prefix: 'acos(', suffix: ')' },
+      { label: 'atan', prefix: 'atan(', suffix: ')' },
+    ],
+  },
+  {
+    key: 'log',
+    col: 'left',
+    items: [
+      { label: 'ln', prefix: 'ln(', suffix: ')' },
+      { label: 'log', prefix: 'log(', suffix: ')' },
+    ],
+  },
+  {
+    key: 'calc',
+    col: 'left',
+    items: [
+      { label: '∫', prefix: 'integrate(', suffix: ',x)' },
+      { label: 'd/dx', prefix: 'diff(', suffix: ',x)' },
+      { label: 'lim', prefix: 'limit(', suffix: ',x,0)' },
+      { label: 'Σ', prefix: 'sum(', suffix: ',x,1,10)' },
+    ],
+  },
+  {
+    key: 'alg',
+    col: 'left',
+    items: [
+      { label: 'solve', prefix: 'solve(', suffix: '=0,x)' },
+      { label: 'factor', prefix: 'factor(', suffix: ')' },
+      { label: 'expand', prefix: 'expand(', suffix: ')' },
+      { label: 'simplify', prefix: 'simplify(', suffix: ')' },
+    ],
+  },
+  {
+    key: 'basic',
+    col: 'right',
+    items: [
+      { label: '( )', prefix: '(', suffix: ')' },
+      { label: '[ ]', prefix: '[', suffix: ']' },
+      { label: '=', prefix: '=', wrap: false },
+      { label: '√', prefix: 'sqrt(', suffix: ')' },
+      { label: 'x²', prefix: '^2', suffix: '' },
+      { label: 'xʸ', prefix: '^', suffix: '' },
+      { label: 'abs', prefix: 'abs(', suffix: ')' },
+    ],
+  },
+  {
+    key: 'num',
+    col: 'right',
+    // A physical-calculator-style keypad (see toolbar__group--num in app.css): digits 7-9/
+    // 4-6/1-3 with the operator column (÷×−) running down the right, then a bottom row of
+    // "." and a wide "0" and "+" - 4 columns throughout, "0" spanning 2 of them.
+    items: [
+      { label: '7', prefix: '7', wrap: false },
+      { label: '8', prefix: '8', wrap: false },
+      { label: '9', prefix: '9', wrap: false },
+      { label: '÷', prefix: '/', wrap: false },
+      { label: '4', prefix: '4', wrap: false },
+      { label: '5', prefix: '5', wrap: false },
+      { label: '6', prefix: '6', wrap: false },
+      { label: '×', prefix: '*', wrap: false },
+      { label: '1', prefix: '1', wrap: false },
+      { label: '2', prefix: '2', wrap: false },
+      { label: '3', prefix: '3', wrap: false },
+      { label: '−', prefix: '-', wrap: false },
+      { label: '.', prefix: '.', wrap: false },
+      { label: '0', prefix: '0', wrap: false, span2: true },
+      { label: '+', prefix: '+', wrap: false },
+    ],
+  },
 ];
 
 const EXAMPLES = ['integrate(sin(x)*x,x)', 'solve(x^2-5*x+6=0,x)', 'factor(x^3-1)', 'limit(sin(x)/x,x,0)'];
@@ -210,10 +301,42 @@ export function mountApp(root) {
   completionsBar.style.display = 'none';
   const inputRow = h('div', { class: 'input-row' }, input, submitBtn, stopBtn, completionsBar);
 
+  const newlineBtn = h(
+    'button',
+    { type: 'button', class: 'toolbar__btn toolbar__btn--wide', title: 'Same as pressing Shift+Enter', onclick: () => insertNewline() },
+    '⏎ New line',
+  );
+  function renderToolbarGroup(g) {
+    return h(
+      'div',
+      { class: `toolbar__group toolbar__group--${g.key}` },
+      g.items.map((t) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `toolbar__btn${t.span2 ? ' toolbar__btn--span2' : ''}`,
+            onclick: () => (t.wrap === false ? insertPlain(t.prefix) : insertSnippet(t.prefix, t.suffix)),
+          },
+          t.label,
+        ),
+      ),
+    );
+  }
   const toolbar = h(
     'div',
     { class: 'toolbar' },
-    TOOLBAR.map((t) => h('button', { type: 'button', class: 'toolbar__btn', onclick: () => insertSnippet(t.prefix, t.suffix) }, t.label)),
+    h(
+      'div',
+      { class: 'toolbar__col toolbar__col--left' },
+      TOOLBAR_GROUPS.filter((g) => g.col === 'left').map(renderToolbarGroup),
+    ),
+    h(
+      'div',
+      { class: 'toolbar__col toolbar__col--right' },
+      TOOLBAR_GROUPS.filter((g) => g.col === 'right').map(renderToolbarGroup),
+    ),
+    newlineBtn,
   );
   const toolbarToggle = h(
     'button',
@@ -264,7 +387,7 @@ export function mountApp(root) {
   function setToolbarVisible(visible) {
     state.toolbarVisible = visible;
     toolbar.style.display = visible ? '' : 'none';
-    toolbarToggle.textContent = visible ? 'Hide symbol buttons ▲' : 'Show symbol buttons ▼';
+    toolbarToggle.textContent = visible ? 'Hide math keyboard ▲' : 'Show math keyboard ▼';
     try {
       localStorage.setItem('toolbarVisible', visible ? '1' : '0');
     } catch {
@@ -339,7 +462,7 @@ export function mountApp(root) {
     functionsMenu.setDisabled(!engineReady);
     settingsMenu.update({ angleMode: state.angleMode, approx: state.approxMode, autosimplify: state.autosimplify, showText: state.showText, theme: state.theme, disabled: !engineReady || state.busy });
 
-    for (const btn of toolbar.children) btn.disabled = !engineReady;
+    for (const btn of toolbar.querySelectorAll('button')) btn.disabled = !engineReady;
   }
 
   function renderHistoryEmptyState() {
@@ -475,6 +598,22 @@ export function mountApp(root) {
 
   function insertSnippet(prefix, suffix) {
     insertAtCursor({ before: prefix, after: suffix }, { wrapSelection: true });
+  }
+
+  // Inserts literal text at the cursor, replacing any current selection like normal typing
+  // would - used for bare identifiers (variable names, digits, constants, "=", ":=") on the
+  // math keyboard, where wrapping a selection (see insertSnippet) would glue it onto the
+  // identifier instead of replacing it, e.g. selecting "2" and tapping "x" should leave "x",
+  // not "x2".
+  function insertPlain(text) {
+    insertAtCursor({ before: text, after: '' });
+  }
+
+  // Mirrors the textarea's own Shift+Enter handling (see handleKeyDown) as a button, for
+  // mobile keyboards where holding Shift while tapping Enter is awkward or unavailable -
+  // lets a system of equations (one per line) be typed without a physical keyboard.
+  function insertNewline() {
+    insertPlain('\n');
   }
 
   // Used by the example expressions shown on the empty history screen.

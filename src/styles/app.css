@@ -496,17 +496,102 @@
   color: var(--accent);
 }
 
+/* Math-keyboard group accents - one muted hue per toolbar__group--* below, just enough
+   color to help the eye tell groups of related buttons apart at a glance. */
+:root {
+  --kbd-vars: #e0a940;
+  --kbd-num: #8f96a3;
+  --kbd-basic: #82b6e0;
+  --kbd-const: #b18cf0;
+  --kbd-trig: #6fa8dc;
+  --kbd-log: #6fcf97;
+  --kbd-calc: #5fc9ae;
+  --kbd-alg: #e0836f;
+}
+
+:root[data-theme='light'] {
+  --kbd-vars: #a06a0a;
+  --kbd-num: #5c6470;
+  --kbd-basic: #1f4e79;
+  --kbd-const: #6b46b0;
+  --kbd-trig: #1f5fa0;
+  --kbd-log: #1f7a4d;
+  --kbd-calc: #0b6b58;
+  --kbd-alg: #a13f2e;
+}
+
+/* Functions/variables on the left, the numeric keypad on the right - loosely mirroring
+   Qalculate's keyboard layout. Stacks to a single column (keypad first, it's what mobile
+   use leans on most) once the columns can no longer sit side by side comfortably. */
 .toolbar {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 8px;
   margin: 14px 0 10px;
 }
 
-@media (max-width: 560px) {
+.toolbar__col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
   .toolbar {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: 1fr;
   }
+  .toolbar__col--right {
+    order: -1;
+  }
+}
+
+.toolbar__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--kbd-color);
+  background: color-mix(in srgb, var(--kbd-color) 9%, transparent);
+}
+
+/* The keypad column's groups line up into the same fixed-width 4-column grid, so the
+   operator/bracket row above sits flush with the digit rows below it - like the numpad
+   block in Qalculate's keyboard. */
+.toolbar__col--right .toolbar__group {
+  display: grid;
+  grid-template-columns: repeat(4, 52px);
+  width: fit-content;
+}
+
+.toolbar__group--vars {
+  --kbd-color: var(--kbd-vars);
+}
+.toolbar__group--num {
+  --kbd-color: var(--kbd-num);
+}
+.toolbar__group--basic {
+  --kbd-color: var(--kbd-basic);
+}
+.toolbar__group--const {
+  --kbd-color: var(--kbd-const);
+}
+.toolbar__group--trig {
+  --kbd-color: var(--kbd-trig);
+}
+.toolbar__group--log {
+  --kbd-color: var(--kbd-log);
+}
+.toolbar__group--calc {
+  --kbd-color: var(--kbd-calc);
+}
+.toolbar__group--alg {
+  --kbd-color: var(--kbd-alg);
+}
+
+@media (max-width: 560px) {
   .toolbar__btn {
     font-size: 13px;
   }
@@ -523,7 +608,9 @@
 }
 
 .toolbar__btn {
-  padding: 8px 4px;
+  flex: 0 0 auto;
+  min-width: 44px;
+  padding: 8px 10px;
   border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -546,6 +633,17 @@
 .toolbar__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.toolbar__btn--wide {
+  grid-column: 1 / -1;
+  width: 100%;
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.toolbar__btn--span2 {
+  grid-column: span 2;
 }
 
 .formula-preview {
