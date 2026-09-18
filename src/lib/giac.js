@@ -401,24 +401,30 @@ function hasTopLevelRelation(s) {
   return splitTopLevelKeyword(s, 'and').length > 1 || splitTopLevelKeyword(s, 'or').length > 1;
 }
 
-// True iff `s` has a top-level "|" outside any (), [], {} nesting - Giac's own "evaluate
-// at"/substitution operator, e.g. "2*x+1|x=7" (giac substitutes x=7 and returns 15 directly,
-// no subst() call needed) or "x+y|x=1,y=2" for several variables at once. A bare `var=value`
-// after such a "|" is part of that substitution, not a separate equation to solve - without
-// this check, hasTopLevelRelation above would spot that "=" and wrapBareEquation below would
-// wrap the whole thing as `solve(2*x+1|x=7,x)`, which is a different (and broken) computation
-// than what the user typed. A "|" nested inside a call the user already wrote themselves (e.g.
-// `solve(x^2=1|x>0,x)`) sits at depth > 0 and is untouched by this.
-function hasTopLevelPipe(s) {
+// Index of the first top-level "|" in `s` (outside any (), [], {} nesting), or -1 if there
+// isn't one. A "|" nested inside a call the user already wrote themselves (e.g.
+// `solve(x^2=1|x>0,x)`) sits at depth > 0 and is invisible to this.
+function findTopLevelPipeIndex(s) {
   let depth = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === '(' || c === '[' || c === '{') depth++;
     else if (c === ')' || c === ']' || c === '}') depth--;
-    else if (c === '|' && depth === 0) return true;
+    else if (c === '|' && depth === 0) return i;
   }
-  return false;
+  return -1;
 }
+
+// True iff `pipeRhs` (the text after a top-level "|") is shaped like Giac's own "evaluate
+// at"/substitution list - one or more comma-separated `name=value` assignments, e.g. "x=7" or
+// "x=1,y=2" (as in "2*x+1|x=7", which Giac substitutes x=7 into and returns 15 directly, no
+// subst() call needed). Each part must have a bare "=" (not "==", "!=", "<=", ">=") right after
+// the name for this to count as an assignment rather than a condition.
+function isSubstitutionPipeRhs(pipeRhs) {
+  const parts = splitTopLevel(pipeRhs, ',');
+  return parts.length > 0 && parts.every((p) => /^\s*[A-Za-z_][A-Za-z0-9_]*\s*=(?!=)[^<>]*$/.test(p));
+}
+
 
 // Splits `s` on a keyword (e.g. "and") only where the match is a whole word (not part of a
 // longer identifier) sitting outside any ()/[]/{} nesting - mirrors splitTopLevel above, but
@@ -538,9 +544,23 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
   const s = expr.trim();
   if (!s) return expr;
   const hasSemi = s.endsWith(';');
-  const body = hasSemi ? s.slice(0, -1) : s;
+  let body = hasSemi ? s.slice(0, -1) : s;
   if (!body) return expr;
-  if (hasTopLevelPipe(body)) return expr;
+
+  // A top-level "|" is either Giac's substitution operator ("2*x+1|x=7", bail out and leave it
+  // for Giac to evaluate directly - see isSubstitutionPipeRhs) or a domain restriction
+  // ("x^2=2|x>0", meaning "solve this equation subject to this condition"). Giac's solve()
+  // doesn't actually filter on a "|" restriction passed alongside the equation (tried as
+  // `solve(x^2=2|x>0,x)` - comes back empty); what does work is folding the condition in as
+  // just another equation of the system, `solve(x^2=2 and x>0,x)`, which the "and"-splitting
+  // below already knows how to build a var-labeled solve() call for. So a restriction pipe is
+  // rewritten to " and " here and falls straight into that existing path.
+  const pipeIdx = findTopLevelPipeIndex(body);
+  if (pipeIdx !== -1) {
+    const pipeRhs = body.slice(pipeIdx + 1);
+    if (isSubstitutionPipeRhs(pipeRhs)) return expr;
+    body = `${body.slice(0, pipeIdx)} and ${pipeRhs}`;
+  }
 
   let equationsText = null;
   let equationParts = null;
