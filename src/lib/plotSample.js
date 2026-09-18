@@ -4,6 +4,7 @@
 // (`a:=2`, `f(x):=...`) resolves exactly as it would on the command line.
 
 import { normalizePowerCalls } from './giac.js';
+import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -57,10 +58,12 @@ export function parseSampleList(raw) {
 }
 
 export async function sampleFunction(evaluateRaw, expr, xmin, xmax, points) {
-  const trimmed = normalizePowerCalls(expr.trim());
+  const { expr: bareExpr, condition } = splitDomainRestriction(expr.trim());
+  const trimmed = normalizePowerCalls(bareExpr.trim());
   if (!trimmed) return [];
+  const sampleExpr = applyDomainRestriction(trimmed, condition);
 
-  const out = await evaluateRaw(buildSampleExpr(trimmed, xmin, xmax, points));
+  const out = await evaluateRaw(buildSampleExpr(sampleExpr, xmin, xmax, points));
   if (out.startsWith('GIAC_ERROR')) {
     throw new Error(out.slice(11).trim() || 'Could not evaluate this expression.');
   }

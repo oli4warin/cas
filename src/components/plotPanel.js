@@ -246,7 +246,7 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
         makeField('exprY', 'y data, e.g. [4,5,6] or a column name', 'y data'),
       );
     } else {
-      fieldsWrap.append(makeField('expr', 'e.g. sin(x), f(x), a*x+b', undefined));
+      fieldsWrap.append(makeField('expr', 'e.g. sin(x), f(x), a*x+b, sin(x)|0<x<7', undefined));
     }
   }
 
