@@ -412,6 +412,12 @@ export function mountApp(root) {
     state.toolbarVisible = visible;
     toolbar.style.display = visible ? '' : 'none';
     toolbarToggle.textContent = visible ? 'Hide math keyboard ▲' : 'Show math keyboard ▼';
+    // inputmode="none" tells mobile browsers this field manages its own on-screen input, so
+    // they suppress the OS virtual keyboard - without it, focusing/tapping the field to use the
+    // math keyboard also pops the OS keyboard up over it. Only relevant while the math keyboard
+    // is shown; with it hidden the field should behave like a normal text input again.
+    if (visible) input.setAttribute('inputmode', 'none');
+    else input.removeAttribute('inputmode');
     try {
       localStorage.setItem('toolbarVisible', visible ? '1' : '0');
     } catch {
