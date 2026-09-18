@@ -463,10 +463,10 @@ const FREE_VAR_IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
 
 // Collects the identifiers in `s` that stand for an unknown to solve for, in first-appearance
 // order: skips Xcas keywords, skips names followed by "(" (those are function calls, e.g.
-// `sin` in `sin(x)`, not variables), and skips anything in `knownConstants` - names the user
+// `sin` in `sin(x)`, not variables), and skips anything in `definitions` - names the user
 // has already assigned this session (see state.definitions in app.js), since a variable
 // that's been given a value is a constant as far as the equation is concerned.
-function collectFreeVariables(s, knownConstants) {
+function collectFreeVariables(s, definitions) {
   const seen = new Set();
   const result = [];
   let m;
@@ -475,13 +475,86 @@ function collectFreeVariables(s, knownConstants) {
     const name = m[0];
     if (seen.has(name)) continue;
     seen.add(name);
-    if (EQUATION_KEYWORDS.has(name) || BUILTIN_CONSTANT_NAMES.has(name) || knownConstants.has(name)) continue;
+    if (EQUATION_KEYWORDS.has(name) || BUILTIN_CONSTANT_NAMES.has(name) || definitions.has(name)) continue;
     let j = m.index + name.length;
     while (j < s.length && /\s/.test(s[j])) j++;
     if (s[j] === '(') continue; // function name, not a variable
     result.push(name);
   }
   return result;
+}
+
+// Substitutes each of `params` for its matching entry in `args` throughout `body`,
+// wrapping every substituted argument in parens so it can't be torn apart by the
+// surrounding precedence (e.g. param "x" and arg "1+2" in body "x^2" must become
+// "(1+2)^2", not "1+2^2"). Word-bounded so a param named "a" doesn't also match inside
+// a longer identifier like "abc".
+function substituteParams(body, params, args) {
+  let result = body;
+  params.forEach((param, i) => {
+    result = result.replace(new RegExp(`\\b${param}\\b`, 'g'), `(${args[i]})`);
+  });
+  return result;
+}
+
+const MAX_EXPANSION_DEPTH = 8;
+
+// Rewrites every call to a function the user has defined this session (f(x):=..., see
+// definitions.js) into its own body with the actual arguments substituted in -
+// "f(1)" becomes "(a*(1)^2+b*(1)+c)" for f(x):=a*x^2+b*x+c - so that collectFreeVariables
+// above, run on the result, finds the *definition's* free parameters (a, b, c) instead of
+// just "f" (which it would otherwise skip as a function name, never seeing what's actually
+// unknown). Only used to build solve()'s variable list (see wrapBareEquation below) - the
+// original, unexpanded equation is still what's actually sent to solve(), since Giac
+// already understands calls to its own user-defined functions directly.
+//
+// A derivative call ("f'(3)", Xcas's shorthand - see collectPrimedFunctionNames) is
+// substituted exactly the same way, the derivative itself is never actually computed. That
+// over-approximates which of the body's free variables the derivative could depend on (the
+// real derivative of a*x^2+b*x+c drops the constant "c" entirely, but this substitution
+// still contains it) - deliberately the safe direction to be wrong in for a variable list:
+// an extra variable that turns out not to appear in the real equation is still solvable for
+// (the system stays exactly as determined by whichever other equations mention it), where a
+// missed variable would silently drop it from solve()'s list and produce a wrong answer.
+//
+// A call to anything *not* in `definitions` (an unknown identifier, or a known one called
+// with the wrong number of arguments) is left exactly as written, but its own argument list
+// is still recursed into - so a known function nested inside an unknown call's arguments
+// (e.g. "g(f(1))" with only f defined) still gets f expanded.
+function expandKnownFunctionCalls(s, definitions, depth = 0) {
+  if (depth > MAX_EXPANSION_DEPTH) return s;
+  let out = '';
+  let i = 0;
+  const n = s.length;
+  while (i < n) {
+    if (/[A-Za-z_]/.test(s[i])) {
+      IDENT_RE.lastIndex = i;
+      const name = IDENT_RE.exec(s)[0];
+      let j = i + name.length;
+      while (s[j] === "'") j++; // Xcas's derivative shorthand - see collectPrimedFunctionNames
+      if (s[j] === '(') {
+        const close = findMatchingParen(s, j);
+        if (close !== -1) {
+          const args = splitTopLevel(s.slice(j + 1, close), ',').map((a) => expandKnownFunctionCalls(a.trim(), definitions, depth + 1));
+          const def = definitions.get(name);
+          if (def && def.kind === 'function' && def.params.length === args.length) {
+            const substituted = substituteParams(def.body, def.params, args);
+            out += `(${expandKnownFunctionCalls(substituted, definitions, depth + 1)})`;
+          } else {
+            out += s.slice(i, j) + `(${args.join(',')})`;
+          }
+          i = close + 1;
+          continue;
+        }
+      }
+      out += name;
+      i = j;
+      continue;
+    }
+    out += s[i];
+    i++;
+  }
+  return out;
 }
 
 // Xcas's derivative shorthand - "y'", "f''", etc, meaning "y differentiated once w.r.t. its
@@ -530,17 +603,22 @@ function pickIndependentVar(funcNames) {
 // ([eq1,eq2],x,[f1,f2]) doesn't work yet and producing that call would just fail. Anything
 // already wrapped in a call (including
 // `solve(...)`/`desolve(...)` themselves) has its "=" at depth > 0 and is left untouched.
-// `knownConstants` (names already assigned this session) are excluded from solve()'s appended
-// variable list - it's asked for only the genuinely free unknowns. That variable is always
-// given explicitly (see parseSolveVarList/parseSolveSolutions below, so the result can always
-// be relabeled with which variable each value belongs to) - as a bracketed list for a system
-// of more than one variable, but deliberately *not* bracketed for a single variable, even
-// though Giac accepts "solve(eq,[x])" too and normally treats it the same as "solve(eq,x)":
-// for a bare inequality specifically, the bracketed form has been observed to make Giac fall
-// back to a numeric "Certificate of existence" result instead of solving it symbolically
-// (e.g. "x>2" wrapped as "solve(x>2,[x])" comes back wrong; "solve(x>2,x)" is correct) - so
-// the one-variable case always uses the plain, unbracketed form to avoid that.
-export function wrapBareEquation(expr, knownConstants = new Set()) {
+// `definitions` (variables and functions already assigned this session, see
+// state.definitions in app.js) are excluded from solve()'s appended variable list - it's
+// asked for only the genuinely free unknowns - and a call to one of its own defined
+// functions is expanded (see expandKnownFunctionCalls) before that list is built, so e.g.
+// "f(1)=2" for f(x):=a*x^2+b*x+c is recognized as a constraint on a, b, c, not on some
+// variable named "f" (which it isn't - "f" is skipped as a function call either way, but
+// without expansion nothing would take its place as the actual unknown). That variable is
+// always given explicitly (see parseSolveVarList/parseSolveSolutions below, so the result
+// can always be relabeled with which variable each value belongs to) - as a bracketed list
+// for a system of more than one variable, but deliberately *not* bracketed for a single
+// variable, even though Giac accepts "solve(eq,[x])" too and normally treats it the same as
+// "solve(eq,x)": for a bare inequality specifically, the bracketed form has been observed to
+// make Giac fall back to a numeric "Certificate of existence" result instead of solving it
+// symbolically (e.g. "x>2" wrapped as "solve(x>2,[x])" comes back wrong; "solve(x>2,x)" is
+// correct) - so the one-variable case always uses the plain, unbracketed form to avoid that.
+export function wrapBareEquation(expr, definitions = new Map()) {
   const s = expr.trim();
   if (!s) return expr;
   const hasSemi = s.endsWith(';');
@@ -593,16 +671,22 @@ export function wrapBareEquation(expr, knownConstants = new Set()) {
   // primed function (e.g. "y'=z and z'=-y") falls through to solve() below same as before,
   // rather than producing a desolve() call that doesn't actually work. Multiple *equations*
   // for the *same* function (e.g. "y'=y" and "y(0)=8", an initial condition) are fine, though
-  // - desolve() takes a list of those exactly like solve() does for a system.
-  const funcNames = collectPrimedFunctionNames(equationsText);
-  if (funcNames.length === 1) {
-    const indepVar = pickIndependentVar(funcNames);
+  // - desolve() takes a list of those exactly like solve() does for a system. A primed name
+  // that's already a defined algebraic function this session (f(x):=...) is filtered out
+  // here rather than counted as an ODE unknown - "f'(3)=1" alongside "f(1)=2" means "add f's
+  // own derivative as one more constraint on f's own parameters", not "solve an ODE for f",
+  // and falls through to the solve() path below (via expandKnownFunctionCalls) same as any
+  // other equation about f.
+  const primedNames = collectPrimedFunctionNames(equationsText);
+  const odeFuncNames = primedNames.filter((name) => definitions.get(name)?.kind !== 'function');
+  if (odeFuncNames.length === 1) {
+    const indepVar = pickIndependentVar(odeFuncNames);
     const eqsArg = equationParts.length > 1 ? `[${equationParts.join(',')}]` : equationParts[0];
-    const wrapped = `desolve(${eqsArg},${indepVar},${funcNames[0]})`;
+    const wrapped = `desolve(${eqsArg},${indepVar},${odeFuncNames[0]})`;
     return hasSemi ? `${wrapped};` : wrapped;
   }
 
-  const freeVars = collectFreeVariables(equationsText, knownConstants);
+  const freeVars = collectFreeVariables(expandKnownFunctionCalls(equationsText, definitions), definitions);
   const varsArg = freeVars.length > 1 ? `,[${freeVars.join(',')}]` : freeVars.length === 1 ? `,${freeVars[0]}` : '';
   const wrapped = `solve(${equationsText}${varsArg})`;
   return hasSemi ? `${wrapped};` : wrapped;
@@ -622,12 +706,48 @@ export function normalizeMultilineInput(text) {
     .join('\n');
 }
 
+// Lets a system of equations be typed across several lines (Shift+Enter) *as an argument to
+// an explicit call* - solve, csolve, fsolve, zeros, czeros, or anything else - while still
+// continuing that call's own syntax right after the equations, on the same line, e.g.
+//   solve("x=y
+//   y=3", [x,y])
+// A newline inside the quotes is joined with " and " exactly like one outside them (see
+// joinInputLines below), and the quotes themselves are then dropped - Giac has no notion of
+// a quoted equation, so "x=y" and "y=3" need to reach it as bare syntax, not a string
+// literal, same as if they'd been typed with no wrapper at all. The quotes exist only to
+// mark where that joining should stop and the rest of the call (here ", [x,y])") resumes; a
+// quoted span with no newline in it is left alone, since unwrapping it would silently turn
+// an actual string argument (e.g. a scatter plot row's column name) into bare syntax for no
+// reason.
+function unwrapMultilineQuotes(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '"') {
+      const close = text.indexOf('"', i + 1);
+      if (close !== -1) {
+        const inner = text.slice(i + 1, close);
+        if (inner.includes('\n')) {
+          out += inner.replace(/\n/g, ' and ');
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+    out += text[i];
+    i++;
+  }
+  return out;
+}
+
 // The string actually handed to the engine: same cleanup as normalizeMultilineInput, but
 // each line joined with " and " instead of a newline - Xcas's own syntax for handing solve()
 // several equations at once (see wrapBareEquation above), which is also exactly what
-// giacToLatex already knows how to render.
+// giacToLatex already knows how to render. Quoted multi-line spans (see
+// unwrapMultilineQuotes above) are unwrapped first so a system typed inside an explicit call
+// joins the same way a bare one does.
 export function joinInputLines(text) {
-  return normalizeMultilineInput(text).replace(/\n/g, ' and ');
+  return unwrapMultilineQuotes(normalizeMultilineInput(text)).replace(/\n/g, ' and ');
 }
 
 // All five take their variable as the last argument, either bare ("solve(x^2=2,x)",
@@ -1134,8 +1254,8 @@ async function fetchLatex(out) {
 //   which is unwrapped out of Giac's outer solution-list (see parseSolveSolutions)
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
-export async function evaluate(expr, knownConstants) {
-  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, knownConstants)))));
+export async function evaluate(expr, definitions) {
+  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, definitions)))));
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
   if (out.startsWith('GIAC_ERROR')) {
@@ -1402,8 +1522,8 @@ const EXACT_DECIMAL_TAIL_RE = /^(.+)=(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|[+-]?infinit
 //   decimal actually loses information - i.e. the exact value's decimal expansion doesn't
 //   terminate (1/3 -> 0.3333...) or isn't rational to begin with (sqrt(2), pi, ...).
 //   1/2 -> 0.5 is exact, so it gets no marker.
-export async function evaluateApprox(expr, knownConstants) {
-  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, knownConstants)))));
+export async function evaluateApprox(expr, definitions) {
+  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, definitions)))));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
@@ -1412,7 +1532,7 @@ export async function evaluateApprox(expr, knownConstants) {
   if (out.startsWith('GIAC_ERROR')) {
     // exact() couldn't wrap this input (e.g. a graphics/plot command) - fall back to a
     // plain evaluation rather than failing the whole submission.
-    return evaluate(expr, knownConstants);
+    return evaluate(expr, definitions);
   }
 
   const unquoted = stripQuotes(out);

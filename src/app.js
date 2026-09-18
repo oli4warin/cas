@@ -939,8 +939,7 @@ export function mountApp(root) {
     renderWarning();
     state.busy = true;
     renderStatus();
-    const knownConstants = new Set(state.definitions.keys());
-    const result = approx ? await giacEvaluateApprox(expr, knownConstants) : await giacEvaluate(expr, knownConstants);
+    const result = approx ? await giacEvaluateApprox(expr, state.definitions) : await giacEvaluate(expr, state.definitions);
     state.busy = false;
     renderStatus();
     pushHistoryEntry({ input: displayInput, ...result });
