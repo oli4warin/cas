@@ -25,8 +25,10 @@ import { Credits } from './components/credits.js';
 import { SettingsMenu } from './components/settingsMenu.js';
 import { FunctionsMenu } from './components/functionsMenu.js';
 import { DistributionMenu } from './components/distributionMenu.js';
+import { RegressionMenu } from './components/regressionMenu.js';
 import { XCAS_COMMANDS } from './lib/xcasCommands.js';
 import { findDistributionMenu } from './lib/distributionParams.js';
+import { isRegressionMenuCommand } from './lib/regressionParams.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -270,6 +272,14 @@ export function mountApp(root) {
     },
     onCancel: () => input.focus(),
   });
+  const regressionMenu = RegressionMenu({
+    onSubmit: (expr) => {
+      input.value = expr;
+      submit({ force: true });
+      input.focus();
+    },
+    onCancel: () => input.focus(),
+  });
   const settingsMenu = SettingsMenu({
     onAngleModeChange: handleAngleModeChange,
     onApproxChange: handleApproxModeChange,
@@ -457,6 +467,7 @@ export function mountApp(root) {
   clear(root);
   root.appendChild(layout);
   root.appendChild(distributionMenu.root);
+  root.appendChild(regressionMenu.root);
 
   // ---------- rendering helpers ----------
 
@@ -1029,6 +1040,13 @@ export function mountApp(root) {
       if (menu) {
         e.preventDefault();
         distributionMenu.open(menu);
+        return;
+      }
+      // Same idea for the bare "regression" command (see isRegressionMenuCommand) - opens
+      // RegressionMenu to pick an x-list, a y-list and a curve type instead of erroring.
+      if (isRegressionMenuCommand(input.value.trim())) {
+        e.preventDefault();
+        regressionMenu.open();
         return;
       }
       e.preventDefault();

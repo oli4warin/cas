@@ -5,6 +5,8 @@
 
 import { giacToLatex } from './giacToLatex.js';
 import { XCAS_COMMAND_ALIASES } from './xcasCommands.js';
+import { fitSinusoid } from './sinRegression.js';
+import { fitPolynomial, fitPower, fitExponential, fitLogarithmic, fitLogistic } from './regression.js';
 
 const EVAL_TIMEOUT_MS = 15000;
 
@@ -1002,6 +1004,160 @@ export function evaluateRaw(expr) {
   return rawEvalAsync(expr);
 }
 
+// Giac has no sinusoidal regression of its own (see cascmd_en658-663 for the
+// linear/exponential/logarithmic/power/polynomial/logistic regressions it does have), and
+// even where it does, its native argument order/return shape isn't worth depending on here -
+// so every <type>_regression(xcoords,ycoords) name below is recognized and handled entirely
+// on the JS side (see regression.js for everything but sinusoidal, sinRegression.js for
+// that) rather than ever being sent to the engine as-is. Must match the call names
+// REGRESSION_TYPES (regressionParams.js) builds for the RegressionMenu UI.
+const REGRESSION_NAMES = new Set([
+  'linear_regression',
+  'quadratic_regression',
+  'cubic_regression',
+  'power_regression',
+  'exponential_regression',
+  'logarithmic_regression',
+  'logistic_regression',
+  'sinusoidal_regression',
+]);
+
+// Recognizes a top-level call to one of REGRESSION_NAMES and returns its canonical name plus
+// its two argument expressions verbatim, unevaluated - or null if `expr` isn't shaped like
+// one (some other command, or the wrong argument count). Mirrors parseDesolveFuncName/
+// parseSolveVarList above.
+function parseRegressionCall(expr) {
+  const s = expr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
+  if (!nameMatch || !body.endsWith(')')) return null;
+  const name = nameMatch[1].toLowerCase();
+  if (!REGRESSION_NAMES.has(name)) return null;
+  const openIdx = nameMatch[0].length - 1;
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',');
+  return args.length === 2 ? { name, xExpr: args[0].trim(), yExpr: args[1].trim() } : null;
+}
+
+// Parses a Giac list-of-numbers string ("[1,2.5,-3e-1]") into JS numbers, NaN for anything
+// that isn't a plain real (mirrors parseSampleList in plotSample.js, kept separate here to
+// avoid a circular import between the two modules).
+const NUMBER_LIST_TOKEN_RE = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i;
+function parseNumberList(raw) {
+  const s = raw.trim();
+  if (!s.startsWith('[') || !s.endsWith(']')) return null;
+  const inner = s.slice(1, -1);
+  if (!inner.trim()) return [];
+  return splitTopLevel(inner, ',').map((tok) => {
+    const t = tok.trim();
+    return NUMBER_LIST_TOKEN_RE.test(t) ? parseFloat(t) : NaN;
+  });
+}
+
+// Rounds a fitted coefficient to 10 significant digits before it's spliced into the result
+// formula - the raw float straight out of fitSinusoid's grid/golden-section search carries
+// meaningless noise past that (e.g. 1.9999999999999991 for a true amplitude of 2), and unlike
+// every other number in this app, this one never passes through Giac's own display rounding.
+function formatFitNumber(n) {
+  return Number.isFinite(n) ? Number(n.toPrecision(10)).toString() : '0';
+}
+
+// Appends `value` (rounded via formatFitNumber) to `expr` as an explicitly signed term -
+// "x-0.7" rather than "x+-0.7" (which Giac itself would happily accept and simplify, but
+// only after a round trip through the engine - not worth risking here, since a bare "x"
+// handed to the engine for cleanup would evaluate away to a number if the user's session has
+// already assigned x a value, e.g. "x:=5", breaking the whole point of this being a function
+// of x). Drops the term entirely when it rounds to exactly zero, matching what Giac's own
+// arithmetic simplification would do with it anyway.
+function appendSignedTerm(expr, value) {
+  const s = formatFitNumber(value);
+  if (s === '0') return expr;
+  return s.startsWith('-') ? `${expr}-${s.slice(1)}` : `${expr}+${s}`;
+}
+
+// Builds "c[d]*x^d + ... + c[1]*x + c[0]" (descending degree, as Giac-ready text) from a
+// fitPolynomial coefficient array - degree-1 terms use "*x" not "*x^1", and the constant
+// term has no "*x^0". Zero coefficients are dropped entirely (matching what Giac's own
+// arithmetic simplification would do with them anyway), except a lone "0" survives if every
+// coefficient rounds to zero.
+function buildPolynomialFormula(coeffs) {
+  const degree = coeffs.length - 1;
+  const powerSuffix = (k) => (k === 0 ? '' : k === 1 ? 'x' : `x^${k}`);
+  let formula = null;
+  for (let k = degree; k >= 0; k--) {
+    const mag = formatFitNumber(Math.abs(coeffs[k]));
+    if (mag === '0') continue;
+    const term = powerSuffix(k) ? `${mag}*${powerSuffix(k)}` : mag;
+    const signedTerm = coeffs[k] < 0 ? `-${term}` : formula === null ? term : `+${term}`;
+    formula = formula === null ? signedTerm : formula + signedTerm;
+  }
+  return formula ?? '0';
+}
+
+// One entry per name in REGRESSION_NAMES above: takes the cleaned (xs,ys) number arrays and
+// returns the fitted curve's right-hand side as Giac-ready text (see regression.js/
+// sinRegression.js for the actual least-squares math, and formatFitNumber/appendSignedTerm
+// above for why every coefficient is rounded and explicitly signed before being spliced in).
+const REGRESSION_FORMULAS = {
+  linear_regression: (xs, ys) => buildPolynomialFormula(fitPolynomial(xs, ys, 1)),
+  quadratic_regression: (xs, ys) => buildPolynomialFormula(fitPolynomial(xs, ys, 2)),
+  cubic_regression: (xs, ys) => buildPolynomialFormula(fitPolynomial(xs, ys, 3)),
+  power_regression: (xs, ys) => {
+    const { a, b } = fitPower(xs, ys);
+    return `${formatFitNumber(a)}*x^${formatFitNumber(b)}`;
+  },
+  exponential_regression: (xs, ys) => {
+    const { a, b } = fitExponential(xs, ys);
+    return `${formatFitNumber(a)}*exp(${formatFitNumber(b)}*x)`;
+  },
+  logarithmic_regression: (xs, ys) => {
+    const { a, b } = fitLogarithmic(xs, ys);
+    return appendSignedTerm(`${formatFitNumber(a)}*ln(x)`, b);
+  },
+  logistic_regression: (xs, ys) => {
+    const { a, b, c } = fitLogistic(xs, ys);
+    return `${formatFitNumber(c)}/(1+${formatFitNumber(a)}*exp(${formatFitNumber(-b)}*x))`;
+  },
+  sinusoidal_regression: (xs, ys) => {
+    const fit = fitSinusoid(xs, ys);
+    const innerArg = appendSignedTerm(`${formatFitNumber(fit.b)}*x`, fit.c);
+    const amplitudeTerm = `${formatFitNumber(fit.a)}*sin(${innerArg})`;
+    return appendSignedTerm(amplitudeTerm, fit.d);
+  },
+};
+
+// Handles a recognized <type>_regression(xExpr,yExpr) call: evaluates both argument
+// expressions numerically (each must resolve to a same-length list of reals - a literal
+// list, or a variable holding one, e.g. a Table column) and fits the named curve type to the
+// resulting points via REGRESSION_FORMULAS. Builds its own {raw,text,latex} result directly,
+// the same way formatDesolveResult does, rather than routing "y=<formula>" through
+// evaluate()/evaluateApprox() - wrapBareEquation would otherwise treat that bare "=" as an
+// equation to *solve* for x and y instead of a formula to display.
+async function evaluateRegression(name, xExpr, yExpr) {
+  const outX = await rawEvalAsync(`evalf(${normalizePowerCalls(xExpr)})`);
+  if (outX.startsWith('GIAC_ERROR')) return { raw: outX, isError: true, text: outX.slice(11).trim(), latex: null, isGraphics: false };
+  const outY = await rawEvalAsync(`evalf(${normalizePowerCalls(yExpr)})`);
+  if (outY.startsWith('GIAC_ERROR')) return { raw: outY, isError: true, text: outY.slice(11).trim(), latex: null, isGraphics: false };
+
+  const xs = parseNumberList(outX);
+  const ys = parseNumberList(outY);
+  const errorResult = (text) => ({ raw: 'GIAC_ERROR ' + text, isError: true, text, latex: null, isGraphics: false });
+  if (!xs || !ys) {
+    return errorResult(`${name} expects two lists of numbers, e.g. ${name}([1,2,3],[0,1,0]).`);
+  }
+
+  let formula;
+  try {
+    const n = Math.min(xs.length, ys.length);
+    formula = REGRESSION_FORMULAS[name](xs.slice(0, n), ys.slice(0, n));
+  } catch (err) {
+    return errorResult(err.message);
+  }
+
+  const clause = `y=${formula}`;
+  return { raw: formula, isError: false, text: clause, latex: giacToLatex(clause) || null, isGraphics: false };
+}
+
 // Giac's own autosimplify() flag (0=none, 1=regroup, 2=simplify) only governs what a real
 // Xcas session auto-applies to a line's result inside its own command loop - it does
 // nothing for a bare caseval() call like this app makes, so evaluate() below has to
@@ -1270,6 +1426,9 @@ async function fetchLatex(out) {
 // - text: a plain-text form suitable as a fallback / for re-insertion into the input
 // - latex: LaTeX source for MathJax, or null if not available (error / plain string / graphics)
 export async function evaluate(expr, definitions) {
+  const regressionCall = parseRegressionCall(expr);
+  if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
+
   const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, definitions)))));
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
@@ -1538,6 +1697,9 @@ const EXACT_DECIMAL_TAIL_RE = /^(.+)=(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|[+-]?infinit
 //   terminate (1/3 -> 0.3333...) or isn't rational to begin with (sqrt(2), pi, ...).
 //   1/2 -> 0.5 is exact, so it gets no marker.
 export async function evaluateApprox(expr, definitions) {
+  const regressionCall = parseRegressionCall(expr);
+  if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
+
   const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, definitions)))));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see

@@ -1,4 +1,5 @@
 import { h } from '../lib/dom.js';
+import { XCAS_COMMANDS } from '../lib/xcasCommands.js';
 
 // A curated reference of Giac/Xcas functions, grouped by topic, aimed at a middle/early
 // high school level - covers arithmetic, algebra, trig, calculus and basic differential
@@ -71,6 +72,31 @@ const CATEGORIES = [
       { label: 'factorial(n)', hint: 'n!', prefix: 'factorial(', suffix: ')' },
       { label: 'comb(n, k)', hint: 'combinations', prefix: 'comb(', suffix: ',2)' },
       { label: 'perm(n, k)', hint: 'permutations', prefix: 'perm(', suffix: ',2)' },
+      { label: 'regression', hint: 'fit a curve to two lists of x/y-data', prefix: 'regression', suffix: '' },
+    ],
+  },
+  {
+    // Each of these is a bare distribution command name (no parentheses) - see
+    // findDistributionMenu/app.js's Enter handling, which opens that command's own
+    // parameter menu (labeled fields like "Number of trials (n)") instead of submitting a
+    // call that would just error without its arguments filled in. Hints reuse the same
+    // one-line descriptions XCAS_COMMANDS shows in tab completion, so the two stay in sync.
+    title: 'Distributions',
+    items: [
+      { label: 'binomial_cdf', hint: XCAS_COMMANDS.binomial_cdf, prefix: 'binomial_cdf', suffix: '' },
+      { label: 'negbinomial_cdf', hint: XCAS_COMMANDS.negbinomial_cdf, prefix: 'negbinomial_cdf', suffix: '' },
+      { label: 'poisson_cdf', hint: XCAS_COMMANDS.poisson_cdf, prefix: 'poisson_cdf', suffix: '' },
+      { label: 'geometric_cdf', hint: XCAS_COMMANDS.geometric_cdf, prefix: 'geometric_cdf', suffix: '' },
+      { label: 'normald_cdf', hint: XCAS_COMMANDS.normald_cdf, prefix: 'normald_cdf', suffix: '' },
+      { label: 'student_cdf', hint: XCAS_COMMANDS.student_cdf, prefix: 'student_cdf', suffix: '' },
+      { label: 'chisquare_cdf', hint: XCAS_COMMANDS.chisquare_cdf, prefix: 'chisquare_cdf', suffix: '' },
+      { label: 'fisher_cdf', hint: XCAS_COMMANDS.fisher_cdf, prefix: 'fisher_cdf', suffix: '' },
+      { label: 'exponentiald_cdf', hint: XCAS_COMMANDS.exponentiald_cdf, prefix: 'exponentiald_cdf', suffix: '' },
+      { label: 'gammad_cdf', hint: XCAS_COMMANDS.gammad_cdf, prefix: 'gammad_cdf', suffix: '' },
+      { label: 'betad_cdf', hint: XCAS_COMMANDS.betad_cdf, prefix: 'betad_cdf', suffix: '' },
+      { label: 'cauchyd_cdf', hint: XCAS_COMMANDS.cauchyd_cdf, prefix: 'cauchyd_cdf', suffix: '' },
+      { label: 'weibull_cdf', hint: XCAS_COMMANDS.weibull_cdf, prefix: 'weibull_cdf', suffix: '' },
+      { label: 'uniformd_cdf', hint: XCAS_COMMANDS.uniformd_cdf, prefix: 'uniformd_cdf', suffix: '' },
     ],
   },
 ];

@@ -99,6 +99,16 @@ export const XCAS_COMMANDS = {
   perm: 'permutations',
   randvector: 'random vector',
   randnorm: 'random normal sample',
+  regression: 'open a menu to fit a curve (linear/quadratic/cubic/power/exponential/logarithmic/logistic/sinusoidal) to two lists of x/y-coordinates',
+  linear_regression: 'fit y=a*x+b to two lists of x/y-coordinates',
+  quadratic_regression: 'fit y=a*x^2+b*x+c to two lists of x/y-coordinates',
+  cubic_regression: 'fit y=a*x^3+b*x^2+c*x+d to two lists of x/y-coordinates',
+  power_regression: 'fit y=a*x^b to two lists of x/y-coordinates',
+  exponential_regression: 'fit y=a*e^(b*x) to two lists of x/y-coordinates',
+  logarithmic_regression: 'fit y=a*ln(x)+b to two lists of x/y-coordinates',
+  logistic_regression: 'fit y=c/(1+a*e^(-b*x)) to two lists of x/y-coordinates',
+  sinusoidal_regression: 'fit y=a*sin(b*x+c)+d to two lists of x/y-coordinates',
+	correlation: 'calculates the correlation coefficient of two lists',
 
   // Statistics & probability - distributions (each <dist>_cdf is the cumulative
   // distribution function, each <dist>_icdf its inverse; the bare name is the
