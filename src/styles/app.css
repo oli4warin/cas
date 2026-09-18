@@ -356,6 +356,45 @@
   background: var(--error-bg);
 }
 
+/* Sits directly to the left of .entry__delete (which is width 20px + 4px right offset),
+   same hover-to-reveal treatment - only ever in the DOM at all when the entry actually has
+   something plottable (see plotExpr in historyEntry.js). */
+.entry__plot {
+  position: absolute;
+  top: 4px;
+  right: 28px;
+  z-index: 1;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+}
+
+.entry:hover .entry__plot,
+.entry__plot:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.entry__plot:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .entry--error .entry__output {
   color: var(--error);
 }
@@ -913,7 +952,8 @@
   }
 
   .entry__copied,
-  .entry__delete {
+  .entry__delete,
+  .entry__plot {
     display: none;
   }
 }

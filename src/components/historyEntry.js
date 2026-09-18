@@ -2,10 +2,16 @@ import { h } from '../lib/dom.js';
 import { typesetNode } from '../lib/mathjax.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
 import { reinsertableValue } from '../lib/giac.js';
+import { plottableExprForEntry } from '../lib/plottable.js';
 
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
-// `showText` is read fresh on every render() call (App owns that as global UI state).
-export function HistoryEntry({ entry, index, onSelect, onDelete }) {
+// `onPlot` is called with (index, expr) when the plot button is clicked, only ever present
+// when plottableExprForEntry actually found something to plot (see there) - same check the
+// "p" keyboard shortcut on a selected output uses (see app.js), so both agree on exactly
+// which outputs offer this. `showText` is read fresh on every render() call (App owns that
+// as global UI state).
+export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot }) {
+  const plotExpr = plottableExprForEntry(entry);
   let copiedTimeout = null;
 
   const inputMath = h('span', { class: 'entry__math' });
@@ -56,7 +62,26 @@ export function HistoryEntry({ entry, index, onSelect, onDelete }) {
     '×',
   );
 
-  const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, inputRow, outputRow);
+  // Only rendered at all when this output is actually plottable (see plotExpr above) -
+  // stopPropagation keeps its click from also bubbling to outputRow's own onclick (which
+  // would otherwise copy the output to the clipboard at the same time).
+  const plotBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'entry__plot',
+      'aria-label': 'Plot this function',
+      title: 'Plot this function (p)',
+      onclick: (e) => {
+        e.stopPropagation();
+        onPlot(index, plotExpr);
+      },
+    },
+    'plot',
+  );
+  if (!plotExpr) plotBtn.style.display = 'none';
+
+  const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, plotBtn, inputRow, outputRow);
 
   // Same best-effort syntax-only converter as the live input preview (see app.js) - it
   // never touches the engine, so a submitted input renders identically to how it looked

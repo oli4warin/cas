@@ -14,6 +14,7 @@ import {
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
 import { applyEntryToDefinitions } from './lib/definitions.js';
+import { plottableExprForEntry } from './lib/plottable.js';
 import { startBridgeHost } from './lib/plotBridge.js';
 import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
 import { makeInitialColumns } from './lib/tableColumns.js';
@@ -382,6 +383,7 @@ export function mountApp(root) {
     h('span', null, 'Enter on empty input repeats the last one'),
     h('span', null, 'Esc clear selection (or return to input from plot/table)'),
     h('span', null, 'Backspace on a selected entry deletes it'),
+    h('span', null, 'p on a selected plottable output sends it to the plot panel'),
     h('span', null, 'Alt+P plot · Alt+T table'),
   );
   const hintsToggle = h(
@@ -566,7 +568,7 @@ export function mountApp(root) {
   function pushHistoryEntry(entry) {
     state.history.push(entry);
     const idx = state.history.length - 1;
-    const view = HistoryEntry({ entry, index: idx, onSelect: selectHistory, onDelete: deleteEntry });
+    const view = HistoryEntry({ entry, index: idx, onSelect: selectHistory, onDelete: deleteEntry, onPlot: (i, expr) => addExpressionToPlot(expr) });
     view.setShowText(state.showText);
     const wrapper = h('div', { id: `entry-${idx}` }, view.root);
     historyList.appendChild(wrapper);
@@ -590,7 +592,7 @@ export function mountApp(root) {
     }
     entryViews.length = idx;
     for (let i = idx; i < state.history.length; i++) {
-      const view = HistoryEntry({ entry: state.history[i], index: i, onSelect: selectHistory, onDelete: deleteEntry });
+      const view = HistoryEntry({ entry: state.history[i], index: i, onSelect: selectHistory, onDelete: deleteEntry, onPlot: (idx, expr) => addExpressionToPlot(expr) });
       view.setShowText(state.showText);
       const wrapper = h('div', { id: `entry-${i}` }, view.root);
       historyList.appendChild(wrapper);
@@ -1064,6 +1066,22 @@ export function mountApp(root) {
     // Left/Right scroll the selected input/output sideways instead of moving the
     // (otherwise empty, while browsing) input's text cursor.
     const step = currentStep();
+
+    // "p" with a plottable output selected sends it straight to the plot panel instead of
+    // typing "p" into the input - mirrors Backspace's "act on the selected entry" below.
+    // Only intercepted when plottableExprForEntry actually finds something (see there and
+    // the entry's own "plot" button in historyEntry.js, which shows under the same check) -
+    // otherwise "p" types normally, same as any other key while browsing (see
+    // onInputChanged, which drops the selection the moment typing resumes).
+    if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step?.part === 'output') {
+      const plotExpr = plottableExprForEntry(state.history[step.idx]);
+      if (plotExpr) {
+        e.preventDefault();
+        addExpressionToPlot(plotExpr);
+        return;
+      }
+    }
+
     if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && step) {
       const wrapper = document.getElementById(`entry-${step.idx}`);
       const row = wrapper?.querySelector(step.part === 'input' ? '.entry__input' : '.entry__output');
@@ -1180,6 +1198,37 @@ export function mountApp(root) {
     state.mobileView = 'plot';
     mountPlotPanel();
     renderLayout();
+  }
+
+  // Sends a history entry's plottable output (see lib/plottable.js) to the plot panel -
+  // wired to both the entry's own "plot" button (historyEntry.js) and the "p" keyboard
+  // shortcut on a selected output (handleKeyDown above). Reuses the first still-blank
+  // function row if there is one (the spare row a freshly opened/emptied panel always
+  // keeps ready to type into - see focusOnMount in plotPanel.js) rather than always adding
+  // a new one, so plotting right after opening the panel for the first time doesn't leave
+  // two rows where one would do.
+  function addExpressionToPlot(expr) {
+    const blankIdx = state.plotRows.findIndex((r) => r.mode === 'function' && !r.expr.trim());
+    const nextRows =
+      blankIdx !== -1
+        ? state.plotRows.map((r, i) => (i === blankIdx ? { ...r, expr } : r))
+        : [...state.plotRows, { ...makeRow(), expr }];
+    state.plotRows = nextRows;
+
+    if (state.plotOpen) {
+      plotPanelInstance?.setRows(nextRows);
+      state.mobileView = 'calculator';
+      renderLayout();
+      input.focus();
+    } else {
+      openPlot();
+      // mountPlotPanel() above schedules its own focus onto a fresh input row a tick from
+      // now (see focusOnMount in plotPanel.js) - queuing this after it, rather than calling
+      // it right here, is what lets it win and land focus back on the CAS input as intended.
+      state.mobileView = 'calculator';
+      renderLayout();
+      setTimeout(() => input.focus(), 0);
+    }
   }
 
   function closePlot() {
