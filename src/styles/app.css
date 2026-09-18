@@ -356,9 +356,11 @@
   background: var(--error-bg);
 }
 
-/* Sits directly to the left of .entry__delete (which is width 20px + 4px right offset),
-   same hover-to-reveal treatment - only ever in the DOM at all when the entry actually has
-   something plottable (see plotExpr in historyEntry.js). */
+/* Sits directly to the left of .entry__delete (which is width 20px + 4px right offset) -
+   only ever in the DOM at all when the entry actually has something plottable (see plotExpr
+   in historyEntry.js), but unlike .entry__delete it stays visible all the time rather than
+   only on hover: it's the discoverable hint that this entry's "p" shortcut exists, so hiding
+   it until hover would defeat that. */
 .entry__plot {
   position: absolute;
   top: 4px;
@@ -377,19 +379,10 @@
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-2px);
 }
 
-.entry:hover .entry__plot,
+.entry__plot:hover,
 .entry__plot:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-}
-
-.entry__plot:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-bg);

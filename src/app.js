@@ -383,7 +383,7 @@ export function mountApp(root) {
     h('span', null, 'Enter on empty input repeats the last one'),
     h('span', null, 'Esc clear selection (or return to input from plot/table)'),
     h('span', null, 'Backspace on a selected entry deletes it'),
-    h('span', null, 'p on a selected plottable output sends it to the plot panel'),
+    h('span', null, 'p on a selected entry with a plottable output sends it to the plot panel'),
     h('span', null, 'Alt+P plot · Alt+T table'),
   );
   const hintsToggle = h(
@@ -1067,13 +1067,14 @@ export function mountApp(root) {
     // (otherwise empty, while browsing) input's text cursor.
     const step = currentStep();
 
-    // "p" with a plottable output selected sends it straight to the plot panel instead of
-    // typing "p" into the input - mirrors Backspace's "act on the selected entry" below.
-    // Only intercepted when plottableExprForEntry actually finds something (see there and
-    // the entry's own "plot" button in historyEntry.js, which shows under the same check) -
-    // otherwise "p" types normally, same as any other key while browsing (see
+    // "p" with an entry selected (its input or its output - either half, same as Backspace
+    // below deletes the whole entry regardless of which half is selected) sends that entry's
+    // plottable output straight to the plot panel instead of typing "p" into the input. Only
+    // intercepted when plottableExprForEntry actually finds something (see there and the
+    // entry's own always-visible "plot" button in historyEntry.js, which shows under the
+    // same check) - otherwise "p" types normally, same as any other key while browsing (see
     // onInputChanged, which drops the selection the moment typing resumes).
-    if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step?.part === 'output') {
+    if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
       const plotExpr = plottableExprForEntry(state.history[step.idx]);
       if (plotExpr) {
         e.preventDefault();
