@@ -31,6 +31,7 @@ export const XCAS_COMMANDS = {
 
   // Algebra
   solve: 'solve an equation',
+  solveq: 'solve a quadratic a*x^2+b*x+c=0 for x: solveq(a,b,c)',
   csolve: 'solve an equation over the complexes',
   fsolve: 'numerically solve an equation',
   linsolve: 'solve a linear system',

@@ -24,6 +24,7 @@ import { PlotPanel } from './components/plotPanel.js';
 import { TablePanel } from './components/tablePanel.js';
 import { Credits } from './components/credits.js';
 import { SettingsMenu } from './components/settingsMenu.js';
+import { VariablesMenu } from './components/variablesMenu.js';
 import { FunctionsMenu } from './components/functionsMenu.js';
 import { DistributionMenu } from './components/distributionMenu.js';
 import { RegressionMenu } from './components/regressionMenu.js';
@@ -288,13 +289,24 @@ export function mountApp(root) {
     onThemeChange: handleThemeChange,
     onShowTextChange: handleShowTextChange,
   });
+  const variablesMenu = VariablesMenu({ onPurge: purgeVariable });
   const statusPill = h('span', { class: 'status-pill' });
 
   const header = h(
     'header',
     { class: 'header' },
     title,
-    h('div', { class: 'header__actions' }, printBtn, plotBtn, tableBtn, functionsMenu.root, settingsMenu.root, statusPill),
+    h(
+      'div',
+      { class: 'header__actions' },
+      printBtn,
+      plotBtn,
+      tableBtn,
+      functionsMenu.root,
+      variablesMenu.root,
+      settingsMenu.root,
+      statusPill,
+    ),
   );
 
   const historyList = h('main', { class: 'history' });
@@ -968,6 +980,7 @@ export function mountApp(root) {
     if (next === state.definitions) return;
     state.definitions = next;
     plotPanelInstance?.setDefinitions(state.definitions);
+    variablesMenu.update(state.definitions);
     bridgeHost?.notifyDefinitionsChanged();
   }
 
@@ -1155,6 +1168,11 @@ export function mountApp(root) {
         (state.tableOpen ? closeTable : openTable)();
         return;
       }
+      if (key === 'v') {
+        e.preventDefault();
+        variablesMenu.toggle();
+        return;
+      }
     }
     if (e.key === 'Escape' && document.activeElement?.closest('.plot-panel, .table-panel')) {
       e.preventDefault();
@@ -1307,7 +1325,7 @@ export function mountApp(root) {
         state.tableColumns = cols;
       },
       onAssign: assignTableColumn,
-      onPurge: purgeTableColumn,
+      onPurge: purgeVariable,
       onClose: closeTable,
     });
     clear(tableItem);
@@ -1333,7 +1351,10 @@ export function mountApp(root) {
     return { ok: true, message: null };
   }
 
-  function purgeTableColumn(name) {
+  // Purges a name straight from the engine (not through submit()'s text-input path) - used
+  // by both the table panel's per-column remove button and the variables menu's per-row
+  // delete button.
+  function purgeVariable(name) {
     if (!name) return;
     giacEvaluateRaw(`purge(${name})`);
     setDefinitions(applyEntryToDefinitions(state.definitions, `purge(${name})`, { isError: false }));

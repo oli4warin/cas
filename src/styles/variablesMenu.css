@@ -1,0 +1,111 @@
+.variables-menu {
+  position: relative;
+}
+
+.variables-menu__trigger {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.variables-menu__trigger:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.variables-menu__trigger--active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.variables-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  max-height: 320px;
+  padding: 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transform-origin: top right;
+  animation: popIn 0.15s ease;
+}
+
+.variables-menu__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.variables-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.variables-menu__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.variables-menu__name {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  flex: 0 0 auto;
+}
+
+.variables-menu__value {
+  font-size: 13px;
+  color: var(--text);
+  opacity: 0.85;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.variables-menu__value mjx-container {
+  margin: 0 !important;
+}
+
+.variables-menu__remove {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.variables-menu__remove:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.variables-menu__empty {
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.7;
+}

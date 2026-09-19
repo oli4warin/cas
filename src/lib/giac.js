@@ -245,6 +245,46 @@ export function normalizeDelCommand(expr) {
   return `purge(${names.join(',')})`;
 }
 
+// A convenience command for the common "solve a quadratic" case: solveq(a,b,c) expands to
+// solve(a*x^2+b*x+c=0,x) before the expression reaches the engine - Giac has no such command
+// of its own. Each argument is substituted in parenthesized (matching substituteParams'
+// approach above, for expanded user-defined functions) so e.g. solveq(1,2+k,-3) works the same
+// as typing out the quadratic formula by hand. Scans for "solveq(" anywhere in the expression
+// (same skeleton as expandKnownFunctionCalls/normalizePowerCalls above), not just as the whole
+// line, so it also works nested inside a larger expression. A call given something other than
+// exactly 3 arguments is left untouched, so it surfaces Giac's own "unknown identifier" error
+// rather than a confusing partial expansion.
+export function normalizeSolveqCalls(expr) {
+  let out = '';
+  let i = 0;
+  const n = expr.length;
+  while (i < n) {
+    if (/[A-Za-z_]/.test(expr[i])) {
+      IDENT_RE.lastIndex = i;
+      const name = IDENT_RE.exec(expr)[0];
+      let j = i + name.length;
+      if (name === 'solveq' && expr[j] === '(') {
+        const close = findMatchingParen(expr, j);
+        if (close !== -1) {
+          const args = splitTopLevel(expr.slice(j + 1, close), ',').map((a) => normalizeSolveqCalls(a.trim()));
+          if (args.length === 3) {
+            const [a, b, c] = args;
+            out += `solve((${a})*x^2+(${b})*x+(${c})=0,x)`;
+            i = close + 1;
+            continue;
+          }
+        }
+      }
+      out += name;
+      i = j;
+      continue;
+    }
+    out += expr[i];
+    i++;
+  }
+  return out;
+}
+
 function findMatchingBracket(s, openIdx) {
   let depth = 0;
   for (let i = openIdx; i < s.length; i++) {
@@ -1447,7 +1487,7 @@ export async function evaluate(expr, definitions) {
   const regressionCall = parseRegressionCall(expr);
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
-  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, definitions)))));
+  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expr), definitions)))));
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
   if (out.startsWith('GIAC_ERROR')) {
@@ -1718,7 +1758,7 @@ export async function evaluateApprox(expr, definitions) {
   const regressionCall = parseRegressionCall(expr);
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
-  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(expr, definitions)))));
+  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expr), definitions)))));
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
