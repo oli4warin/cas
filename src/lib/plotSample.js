@@ -5,6 +5,7 @@
 
 import { normalizePowerCalls } from './giac.js';
 import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js';
+import { substitutePlotParams } from './plotParams.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -57,11 +58,13 @@ export function parseSampleList(raw) {
   });
 }
 
-export async function sampleFunction(evaluateRaw, expr, xmin, xmax, points) {
+export async function sampleFunction(evaluateRaw, expr, xmin, xmax, points, sliders) {
   const { expr: bareExpr, condition } = splitDomainRestriction(expr.trim());
   const trimmed = normalizePowerCalls(bareExpr.trim());
   if (!trimmed) return [];
-  const sampleExpr = applyDomainRestriction(trimmed, condition);
+  const substitutedExpr = substitutePlotParams(trimmed, sliders);
+  const substitutedCondition = condition ? substitutePlotParams(condition, sliders) : null;
+  const sampleExpr = applyDomainRestriction(substitutedExpr, substitutedCondition);
 
   const out = await evaluateRaw(buildSampleExpr(sampleExpr, xmin, xmax, points));
   if (out.startsWith('GIAC_ERROR')) {
@@ -115,10 +118,12 @@ export function parseParametricList(raw) {
   });
 }
 
-export async function sampleParametric(evaluateRaw, exprX, exprY, tmin, tmax, points) {
-  const xe = normalizePowerCalls(exprX.trim());
-  const ye = normalizePowerCalls(exprY.trim());
-  if (!xe || !ye) return [];
+export async function sampleParametric(evaluateRaw, exprX, exprY, tmin, tmax, points, sliders) {
+  const xe0 = normalizePowerCalls(exprX.trim());
+  const ye0 = normalizePowerCalls(exprY.trim());
+  if (!xe0 || !ye0) return [];
+  const xe = substitutePlotParams(xe0, sliders);
+  const ye = substitutePlotParams(ye0, sliders);
 
   const out = await evaluateRaw(buildParametricSampleExpr(xe, ye, tmin, tmax, points));
   if (out.startsWith('GIAC_ERROR')) {
@@ -173,9 +178,10 @@ export async function sampleScatter(evaluateRaw, exprX, exprY) {
   return pts;
 }
 
-export async function sampleComplex(evaluateRaw, exprZ, tmin, tmax, points) {
-  const ze = normalizePowerCalls(exprZ.trim());
-  if (!ze) return [];
+export async function sampleComplex(evaluateRaw, exprZ, tmin, tmax, points, sliders) {
+  const ze0 = normalizePowerCalls(exprZ.trim());
+  if (!ze0) return [];
+  const ze = substitutePlotParams(ze0, sliders);
 
   const out = await evaluateRaw(buildComplexSampleExpr(ze, tmin, tmax, points));
   if (out.startsWith('GIAC_ERROR')) {

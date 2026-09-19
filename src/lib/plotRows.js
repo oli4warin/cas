@@ -21,5 +21,6 @@ export function makeRow() {
     tmax: DEFAULT_TMAX,
     visible: true,
     color: null, // null = use the palette default for this row's position (see COLORS in plotPanel.js)
+    sliders: {}, // paramName -> { value, min, max, step } - see lib/plotParams.js
   };
 }

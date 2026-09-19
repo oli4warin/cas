@@ -3,6 +3,7 @@ import { definitionLabel } from '../lib/definitions.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
 import { sampleFunction, sampleParametric, sampleComplex, sampleScatter } from '../lib/plotSample.js';
 import { DEFAULT_VIEW, makeRow } from '../lib/plotRows.js';
+import { collectRowParams, reconcileSliders } from '../lib/plotParams.js';
 import { FormulaPreview } from './formulaPreview.js';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
@@ -34,6 +35,12 @@ function formatTick(v, step) {
   const decimals = Math.max(0, -Math.floor(Math.log10(step)));
   const s = v.toFixed(Math.min(6, decimals));
   return s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+}
+
+// A slider's current value, trimmed to 2 decimal places with no trailing zeros - just for
+// the little readout next to each parameter's range input.
+function formatSliderValue(v) {
+  return v.toFixed(2).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
 }
 
 // Expands whichever axis is "too tight" for the container so pixels-per-unit matches on
@@ -169,12 +176,24 @@ function draw(canvas, rawView, curves, aspectLocked) {
 // One plot row's DOM, built once and reconciled in place on every update() - this is what
 // keeps a focused input field from losing focus (and its caret position) on every
 // keystroke, the way a naive full-teardown-and-rebuild would.
-function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocus, onTChange, onToggle, onColorChange, onRemove }) {
+function createRowView({
+  onModeChange,
+  onFieldInput,
+  onFieldKeyDown,
+  onFieldFocus,
+  onTChange,
+  onToggle,
+  onColorChange,
+  onRemove,
+  onSliderChange,
+}) {
   let currentMode = null;
   const fieldEls = {};
   const previews = {};
   let tminEl = null;
   let tmaxEl = null;
+  let sliderKey = null;
+  const sliderEls = {}; // paramName -> { root, rangeEl, valueEl }
 
   const swatch = h('input', {
     type: 'color',
@@ -195,8 +214,10 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
   const removeBtn = h('button', { type: 'button', class: 'plot-row__remove', title: 'Remove', onclick: onRemove }, '×');
   const errorSpan = h('span', { class: 'plot-row__error' });
   errorSpan.style.display = 'none';
+  const slidersWrap = h('div', { class: 'plot-row__sliders' });
+  slidersWrap.style.display = 'none';
 
-  const root = h('div', { class: 'plot-row' }, swatch, modeSelect, fieldsWrap, toggleBtn, removeBtn, errorSpan);
+  const root = h('div', { class: 'plot-row' }, swatch, modeSelect, fieldsWrap, toggleBtn, removeBtn, slidersWrap, errorSpan);
 
   function makeField(field, placeholder, previewPlaceholder) {
     const input = h('input', {
@@ -250,6 +271,47 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
     }
   }
 
+  // Builds one labeled range input per detected parameter (see lib/plotParams.js) - only
+  // rebuilt when the *set* of parameters changes (a param typed in or out, or resolved by a
+  // CAS definition), not on every value tick, so dragging a slider doesn't fight its own
+  // rebuild for focus.
+  function makeSliderControl(name) {
+    const nameEl = h('span', { class: 'plot-row__sliderName' }, name);
+    const valueEl = h('span', { class: 'plot-row__sliderValue' });
+    const rangeEl = h('input', {
+      type: 'range',
+      class: 'plot-row__sliderRange',
+      oninput: (e) => onSliderChange(name, parseFloat(e.target.value)),
+    });
+    const root = h('span', { class: 'plot-row__slider' }, nameEl, rangeEl, valueEl);
+    return { root, rangeEl, valueEl };
+  }
+
+  function updateSliders(sliders) {
+    const names = Object.keys(sliders);
+    const key = names.join(',');
+    if (key !== sliderKey) {
+      sliderKey = key;
+      clear(slidersWrap);
+      for (const k of Object.keys(sliderEls)) delete sliderEls[k];
+      for (const name of names) {
+        const ctrl = makeSliderControl(name);
+        sliderEls[name] = ctrl;
+        slidersWrap.appendChild(ctrl.root);
+      }
+      slidersWrap.style.display = names.length ? '' : 'none';
+    }
+    for (const name of names) {
+      const { value, min, max, step } = sliders[name];
+      const { rangeEl, valueEl } = sliderEls[name];
+      if (rangeEl.min !== String(min)) rangeEl.min = min;
+      if (rangeEl.max !== String(max)) rangeEl.max = max;
+      if (rangeEl.step !== String(step)) rangeEl.step = step;
+      if (document.activeElement !== rangeEl) rangeEl.value = value;
+      valueEl.textContent = formatSliderValue(value);
+    }
+  }
+
   function update(row, index, errorMessage) {
     const color = rowColor(row, index);
     if (swatch.value !== color) swatch.value = color;
@@ -265,6 +327,8 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onFieldFocu
     }
     if (tminEl && tminEl.value !== row.tmin) tminEl.value = row.tmin;
     if (tmaxEl && tmaxEl.value !== row.tmax) tmaxEl.value = row.tmax;
+
+    updateSliders(row.sliders ?? {});
 
     toggleBtn.textContent = row.visible ? '●' : '○';
     toggleBtn.title = row.visible ? 'Hide' : 'Show';
@@ -302,6 +366,7 @@ export function PlotPanel({
   let focused = null; // { rowId, field }
   let aspectLocked = true;
   let debounceTimer = null;
+  let immediateResampleHandle = null;
   let requestId = 0;
   let dragState = null;
   const rowViews = new Map(); // rowId -> RowView
@@ -439,6 +504,35 @@ export function PlotPanel({
     emitRows(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
+  // Dragging a slider goes through its own path rather than updateRow()/emitRows() so it can
+  // resample immediately (see scheduleResampleImmediate) instead of waiting out the typing
+  // debounce.
+  function setSliderValue(id, name, value) {
+    const row = rows.find((r) => r.id === id);
+    if (!row || !row.sliders[name]) return;
+    rows = rows.map((r) => (r.id === id ? { ...r, sliders: { ...r.sliders, [name]: { ...r.sliders[name], value } } } : r));
+    onRowsChange(rows);
+    renderRows();
+    scheduleResampleImmediate();
+  }
+
+  // Adds/drops sliders to match each row's currently-detected plot parameters (see
+  // lib/plotParams.js) - run at the top of every renderRows() so it stays in sync whether
+  // rows changed (a param typed in or out) or `definitions` did (a param just got assigned in
+  // the CAS, or purged back out of it). Returns whether anything actually changed, so the
+  // caller knows whether a resample is owed.
+  function reconcileRowSliders() {
+    let changed = false;
+    rows = rows.map((row) => {
+      const sliders = reconcileSliders(row.sliders, collectRowParams(row, definitions));
+      if (sliders === row.sliders) return row;
+      changed = true;
+      return { ...row, sliders };
+    });
+    if (changed) onRowsChange(rows);
+    return changed;
+  }
+
   // Visibility and color are purely draw-time concerns - the curve's sampled points don't
   // change - so unlike updateRow() these redraw straight from what's already in `curves`
   // instead of going through emitRows()/scheduleResample(), which would debounce a fresh
@@ -486,6 +580,8 @@ export function PlotPanel({
   }
 
   function renderRows() {
+    const slidersChanged = reconcileRowSliders();
+
     const seen = new Set();
     const desired = [];
     rows.forEach((row, i) => {
@@ -503,6 +599,7 @@ export function PlotPanel({
           onToggle: () => toggleVisible(row.id),
           onColorChange: (color) => setColor(row.id, color),
           onRemove: () => removeRow(row.id),
+          onSliderChange: (name, value) => setSliderValue(row.id, name, value),
         });
         rowViews.set(row.id, view);
       }
@@ -523,6 +620,7 @@ export function PlotPanel({
       const row = rows.find((r) => r.id === id);
       if (row) focusField(id, fieldOrder(row)[0]);
     }
+    if (slidersChanged) scheduleResample();
   }
 
   function renderChips() {
@@ -560,6 +658,23 @@ export function PlotPanel({
     debounceTimer = setTimeout(resample, SAMPLE_DEBOUNCE_MS);
   }
 
+  // Used while a slider is actively being dragged, where the usual debounce (needed for
+  // typing, which passes through plenty of momentarily-invalid expressions) would just read
+  // as lag - a range input's own "input" event already fires at most once per animation
+  // frame's worth of movement, so coalescing onto the next frame (rather than firing once per
+  // event, or waiting out the typing debounce) keeps the curve tracking the handle with no
+  // perceptible delay while never queueing more than one resample per frame. Stale
+  // in-flight evaluations are still discarded by resample()'s own requestId check, so a slow
+  // engine round trip can never show a curve older than the slider's current position.
+  function scheduleResampleImmediate() {
+    clearTimeout(debounceTimer);
+    if (immediateResampleHandle != null) return;
+    immediateResampleHandle = requestAnimationFrame(() => {
+      immediateResampleHandle = null;
+      resample();
+    });
+  }
+
   function resample() {
     const myRequest = ++requestId;
     const width = canvas.clientWidth || 600;
@@ -586,13 +701,13 @@ export function PlotPanel({
           delete curves[row.id];
           continue;
         }
-        sampleParametric(evaluateRaw, row.exprX, row.exprY, row.tmin, row.tmax, points).then(applyResult, applyError);
+        sampleParametric(evaluateRaw, row.exprX, row.exprY, row.tmin, row.tmax, points, row.sliders).then(applyResult, applyError);
       } else if (row.mode === 'complex') {
         if (!row.exprZ.trim()) {
           delete curves[row.id];
           continue;
         }
-        sampleComplex(evaluateRaw, row.exprZ, row.tmin, row.tmax, points).then(applyResult, applyError);
+        sampleComplex(evaluateRaw, row.exprZ, row.tmin, row.tmax, points, row.sliders).then(applyResult, applyError);
       } else if (row.mode === 'scatter') {
         if (!row.exprX.trim() || !row.exprY.trim()) {
           delete curves[row.id];
@@ -604,7 +719,7 @@ export function PlotPanel({
           delete curves[row.id];
           continue;
         }
-        sampleFunction(evaluateRaw, row.expr, xmin, xmax, points).then(applyResult, applyError);
+        sampleFunction(evaluateRaw, row.expr, xmin, xmax, points, row.sliders).then(applyResult, applyError);
       }
     }
   }
@@ -635,6 +750,7 @@ export function PlotPanel({
   function destroy() {
     resizeObserver?.disconnect();
     clearTimeout(debounceTimer);
+    if (immediateResampleHandle != null) cancelAnimationFrame(immediateResampleHandle);
   }
 
   return {
@@ -655,6 +771,11 @@ export function PlotPanel({
     },
     setDefinitions(next) {
       definitions = next;
+      // A definition changing (a new one assigned, or one purged) can change which of a
+      // row's free names still need a slider - e.g. typing "a:=3" should make "a"'s slider
+      // disappear and start using that value instead. renderRows() reconciles that (see
+      // reconcileRowSliders) and schedules a resample itself if anything actually changed.
+      renderRows();
       renderChips();
     },
     setConnectionStatus(status) {

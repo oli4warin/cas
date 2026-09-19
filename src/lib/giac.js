@@ -468,7 +468,7 @@ const FREE_VAR_IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
 // `sin` in `sin(x)`, not variables), and skips anything in `definitions` - names the user
 // has already assigned this session (see state.definitions in app.js), since a variable
 // that's been given a value is a constant as far as the equation is concerned.
-function collectFreeVariables(s, definitions) {
+export function collectFreeVariables(s, definitions) {
   const seen = new Set();
   const result = [];
   let m;
@@ -523,7 +523,7 @@ const MAX_EXPANSION_DEPTH = 8;
 // with the wrong number of arguments) is left exactly as written, but its own argument list
 // is still recursed into - so a known function nested inside an unknown call's arguments
 // (e.g. "g(f(1))" with only f defined) still gets f expanded.
-function expandKnownFunctionCalls(s, definitions, depth = 0) {
+export function expandKnownFunctionCalls(s, definitions, depth = 0) {
   if (depth > MAX_EXPANSION_DEPTH) return s;
   let out = '';
   let i = 0;
