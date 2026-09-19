@@ -227,6 +227,24 @@ export function normalizeAliasCommands(expr) {
   return expr.replace(COMMAND_ALIAS_RE, (m) => XCAS_COMMAND_ALIASES[m.toLowerCase()]);
 }
 
+// A friendlier, calculator-style alias for `purge`: Giac has no bare "del <name>" command of
+// its own - typed as-is it just parses as the *product* of two undefined identifiers ("del"
+// and "a"), silently leaving "a" untouched instead of undefining it. Recognized only when it's
+// the *entire* submitted line (so an unrelated expression that happens to contain "del"
+// elsewhere is never touched) and rewritten to the equivalent purge(...) call before the
+// expression reaches the engine - see submit() in app.js, which applies this to `expr` before
+// both evaluating it and folding it into `definitions` (definitions.js has no matching parser
+// of its own for the bare "del" form, only for "purge(...)", so both sides have to agree on
+// the same rewritten text).
+const DEL_COMMAND_RE = new RegExp(`^del\\s+(${IDENT_RE.source}(?:\\s*,\\s*${IDENT_RE.source})*)\\s*;?\\s*$`, 'i');
+
+export function normalizeDelCommand(expr) {
+  const m = expr.trim().match(DEL_COMMAND_RE);
+  if (!m) return expr;
+  const names = m[1].split(',').map((n) => n.trim());
+  return `purge(${names.join(',')})`;
+}
+
 function findMatchingBracket(s, openIdx) {
   let depth = 0;
   for (let i = openIdx; i < s.length; i++) {

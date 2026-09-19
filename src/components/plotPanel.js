@@ -774,9 +774,14 @@ export function PlotPanel({
       // A definition changing (a new one assigned, or one purged) can change which of a
       // row's free names still need a slider - e.g. typing "a:=3" should make "a"'s slider
       // disappear and start using that value instead. renderRows() reconciles that (see
-      // reconcileRowSliders) and schedules a resample itself if anything actually changed.
+      // reconcileRowSliders) and schedules a resample itself, but only when the slider set
+      // itself changed. A *value* changing for a name that was already excluded from sliders
+      // (e.g. "a:=1" followed by "a:=2") doesn't touch the slider set, so it wouldn't otherwise
+      // trigger a resample even though the plotted curve depends on it - schedule one here
+      // unconditionally instead (app.js only calls setDefinitions when the map actually changed).
       renderRows();
       renderChips();
+      scheduleResample();
     },
     setConnectionStatus(status) {
       statusEl.style.display = status === false ? '' : 'none';

@@ -173,6 +173,7 @@ export const XCAS_COMMANDS = {
 
   // Programming
   purge: 'delete a variable/function definition',
+  del: 'delete a variable/function definition (alias for purge, e.g. "del a" or "del a, b")',
   assume: 'assume a property of a variable',
   piecewise: 'piecewise-defined expression',
   when: 'conditional expression',

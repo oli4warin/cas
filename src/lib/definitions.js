@@ -7,10 +7,38 @@
 const IDENT = '[A-Za-z_][A-Za-z0-9_]*';
 const FUNC_DEF_RE = new RegExp(`^(${IDENT})\\s*\\(\\s*(${IDENT}(?:\\s*,\\s*${IDENT})*)\\s*\\)\\s*:=\\s*(.+)$`);
 const VAR_DEF_RE = new RegExp(`^(${IDENT})\\s*:=\\s*(.+)$`);
+const MULTI_VAR_DEF_RE = new RegExp(`^(${IDENT}(?:\\s*,\\s*${IDENT})+)\\s*:=\\s*(.+)$`);
 const PURGE_RE = new RegExp(`^purge\\s*\\(\\s*(${IDENT}(?:\\s*,\\s*${IDENT})*)\\s*\\)\\s*$`);
 
+// Xcas statements are conventionally allowed a trailing ";" (Giac itself strips it before
+// evaluating - see stripTrailingSemicolon in giac.js) - strip it here too before matching so
+// e.g. "purge(a);" is recognized the same as "purge(a)" instead of silently falling through
+// to "no definition/purge found here".
+function stripTrailingSemicolon(s) {
+  return s.endsWith(';') ? s.slice(0, -1).trim() : s;
+}
+
+// Splits a bracketed list's inner text on top-level commas only (ignoring commas nested
+// inside further brackets/parens/braces), e.g. "1,[2,3],4" -> ["1", "[2,3]", "4"].
+function splitTopLevelCommas(s) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) {
+      parts.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
 export function parseDefinition(expr) {
-  const s = expr.trim();
+  const s = stripTrailingSemicolon(expr.trim());
   let m = s.match(FUNC_DEF_RE);
   if (m) {
     return { kind: 'function', name: m[1], params: m[2].split(',').map((p) => p.trim()), body: m[3].trim() };
@@ -22,8 +50,25 @@ export function parseDefinition(expr) {
   return null;
 }
 
+// Xcas's simultaneous-assignment form, e.g. "a,b:=[1,2]" - binds every name on the left at
+// once, so each one has to count as "defined" (for plotParams.js's slider-exclusion check)
+// just like a plain "a:=1" does. The exact per-name value isn't read anywhere else in the app
+// (only whether a name `.has()` a definition matters - see collectFreeVariables in giac.js),
+// so a best-effort pairing with the right-hand list's elements is enough; a shape that doesn't
+// line up 1:1 just falls back to giving every name the whole right-hand text as a placeholder.
+export function parseMultiDefinition(expr) {
+  const s = stripTrailingSemicolon(expr.trim());
+  const m = s.match(MULTI_VAR_DEF_RE);
+  if (!m) return null;
+  const names = m[1].split(',').map((n) => n.trim());
+  let rhs = m[2].trim();
+  if (rhs.startsWith('[') && rhs.endsWith(']')) rhs = rhs.slice(1, -1);
+  const values = splitTopLevelCommas(rhs).map((v) => v.trim());
+  return names.map((name, i) => ({ kind: 'variable', name, body: values.length === names.length ? values[i] : rhs }));
+}
+
 function parsePurge(expr) {
-  const m = expr.trim().match(PURGE_RE);
+  const m = stripTrailingSemicolon(expr.trim()).match(PURGE_RE);
   return m ? m[1].split(',').map((p) => p.trim()) : null;
 }
 
@@ -37,6 +82,13 @@ export function applyEntryToDefinitions(definitions, expr, result) {
   if (def) {
     const next = new Map(definitions);
     next.set(def.name, def);
+    return next;
+  }
+
+  const multiDefs = parseMultiDefinition(expr);
+  if (multiDefs) {
+    const next = new Map(definitions);
+    for (const d of multiDefs) next.set(d.name, d);
     return next;
   }
 

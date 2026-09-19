@@ -8,6 +8,7 @@ import {
   reinsertableValue,
   joinInputLines,
   normalizeMultilineInput,
+  normalizeDelCommand,
   evaluateRaw as giacEvaluateRaw,
   setAutosimplifyLevel as giacSetAutosimplifyLevel,
 } from './lib/giac.js';
@@ -941,7 +942,7 @@ export function mountApp(root) {
     // per line, for the history entry; `expr` is the single " and "-joined line actually
     // handed to the engine, e.g. solving "x+y=5" and "y-x=3" together.
     const displayInput = normalizeMultilineInput(input.value) || state.history[state.history.length - 1]?.input || '';
-    const expr = joinInputLines(displayInput);
+    const expr = normalizeDelCommand(joinInputLines(displayInput));
     if (!expr || !engineReady || state.busy) return;
     if (!force && looksIncomplete(expr)) {
       state.warning = 'This expression looks unfinished (dangling operator or unmatched parenthesis) - evaluating it can take a very long time. Press Enter to run it anyway.';
