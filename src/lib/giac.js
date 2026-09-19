@@ -752,19 +752,22 @@ export function wrapBareEquation(expr, definitions = new Map()) {
   return hasSemi ? `${wrapped};` : wrapped;
 }
 
-// True when `raw` is a well-formed Giac expression whose only free identifier is exactly
-// `varName` (default "x") - not an equation/inequality (the kind of thing solve() itself
-// returns), and not a lone number or a result with no variable left in it at all. Used by
-// the history entry's "plot" button (see lib/plottable.js) to decide whether an output like
-// "x^2+2*x+1" (from expand((x+1)^2), say) can be offered as y = <output> in the plot panel;
-// `definitions` is deliberately not consulted here; the *evaluated* output already has every
-// session variable/constant resolved to its value by Giac itself, so any name still present
-// is genuinely free in this expression regardless of what the session knows elsewhere.
-export function isSingleVariableExpression(raw, varName = 'x') {
+// True when `raw` is a well-formed Giac expression that's free in `varName` (default "x") -
+// not an equation/inequality (the kind of thing solve() itself returns), and not a lone
+// number or a result with no variable left in it at all. Other free identifiers besides
+// `varName` are fine (e.g. "a*x+b"): the plot panel offers a slider for each of those (see
+// lib/plotParams.js), so a result doesn't need to be single-variable to be plottable, just to
+// actually mention `varName`. Used by the history entry's "plot" button (see
+// lib/plottable.js) to decide whether an output like "x^2+2*x+1" (from expand((x+1)^2), say)
+// or "a*x+b" can be offered as y = <output> in the plot panel; `definitions` is deliberately
+// not consulted here - the *evaluated* output already has every session variable/constant
+// resolved to its value by Giac itself, so any name still present is genuinely free in this
+// expression regardless of what the session knows elsewhere.
+export function isPlottableInX(raw, varName = 'x') {
   const s = (raw ?? '').trim();
   if (!s || hasTopLevelRelation(s)) return false;
   const vars = collectFreeVariables(s, new Map());
-  return vars.length === 1 && vars[0] === varName;
+  return vars.includes(varName);
 }
 
 // The input field is a multiline textarea so a system of equations can be typed one

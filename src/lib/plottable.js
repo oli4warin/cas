@@ -4,15 +4,16 @@
 // entries.
 
 import { parseDefinition } from './definitions.js';
-import { isSingleVariableExpression, reinsertableValue } from './giac.js';
+import { isPlottableInX, reinsertableValue } from './giac.js';
 
 // Two shapes count as plottable: a function this session just defined with exactly one
 // parameter (f(x):=..., or even f(t):=... - calling it back as "f(x)" always comes out as
 // an expression in x regardless of what the definition itself calls its own parameter,
-// since Giac substitutes whatever's actually passed), or a plain result whose only free
-// identifier is "x" (e.g. expand((x+1)^2) => "x^2+2*x+1"). Returns the Giac expression to
-// hand the plot panel, or null if this entry isn't offerable at all (an error, an equation,
-// a number with no variable left in it, or an expression in some other variable).
+// since Giac substitutes whatever's actually passed), or a plain result that's free in "x"
+// (e.g. expand((x+1)^2) => "x^2+2*x+1", or "a*x+b" - "a" and "b" just pick up sliders in the
+// plot panel, see lib/plotParams.js). Returns the Giac expression to hand the plot panel, or
+// null if this entry isn't offerable at all (an error, an equation, or a result that doesn't
+// actually mention x).
 export function plottableExprForEntry(entry) {
   if (!entry || entry.isError) return null;
 
@@ -22,5 +23,5 @@ export function plottableExprForEntry(entry) {
   }
 
   const raw = reinsertableValue(entry.raw ?? '');
-  return isSingleVariableExpression(raw) ? raw : null;
+  return isPlottableInX(raw) ? raw : null;
 }
