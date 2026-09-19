@@ -266,6 +266,29 @@
   accent-color: var(--accent);
 }
 
+.plot-row__sliderBound {
+  width: 34px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 3px;
+  -moz-appearance: textfield;
+}
+
+.plot-row__sliderBound::-webkit-outer-spin-button,
+.plot-row__sliderBound::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.plot-row__sliderBound:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
 .plot-row__sliderValue {
   font-family: var(--mono);
   min-width: 34px;

@@ -186,6 +186,7 @@ function createRowView({
   onColorChange,
   onRemove,
   onSliderChange,
+  onSliderRangeChange,
 }) {
   let currentMode = null;
   const fieldEls = {};
@@ -193,7 +194,7 @@ function createRowView({
   let tminEl = null;
   let tmaxEl = null;
   let sliderKey = null;
-  const sliderEls = {}; // paramName -> { root, rangeEl, valueEl }
+  const sliderEls = {}; // paramName -> { root, rangeEl, valueEl, minEl, maxEl }
 
   const swatch = h('input', {
     type: 'color',
@@ -278,13 +279,25 @@ function createRowView({
   function makeSliderControl(name) {
     const nameEl = h('span', { class: 'plot-row__sliderName' }, name);
     const valueEl = h('span', { class: 'plot-row__sliderValue' });
+    const minEl = h('input', {
+      type: 'number',
+      class: 'plot-row__sliderBound',
+      title: 'Minimum',
+      oninput: (e) => onSliderRangeChange(name, 'min', e.target.value),
+    });
+    const maxEl = h('input', {
+      type: 'number',
+      class: 'plot-row__sliderBound',
+      title: 'Maximum',
+      oninput: (e) => onSliderRangeChange(name, 'max', e.target.value),
+    });
     const rangeEl = h('input', {
       type: 'range',
       class: 'plot-row__sliderRange',
       oninput: (e) => onSliderChange(name, parseFloat(e.target.value)),
     });
-    const root = h('span', { class: 'plot-row__slider' }, nameEl, rangeEl, valueEl);
-    return { root, rangeEl, valueEl };
+    const root = h('span', { class: 'plot-row__slider' }, nameEl, minEl, rangeEl, maxEl, valueEl);
+    return { root, rangeEl, valueEl, minEl, maxEl };
   }
 
   function updateSliders(sliders) {
@@ -303,11 +316,13 @@ function createRowView({
     }
     for (const name of names) {
       const { value, min, max, step } = sliders[name];
-      const { rangeEl, valueEl } = sliderEls[name];
+      const { rangeEl, valueEl, minEl, maxEl } = sliderEls[name];
       if (rangeEl.min !== String(min)) rangeEl.min = min;
       if (rangeEl.max !== String(max)) rangeEl.max = max;
       if (rangeEl.step !== String(step)) rangeEl.step = step;
       if (document.activeElement !== rangeEl) rangeEl.value = value;
+      if (document.activeElement !== minEl) minEl.value = min;
+      if (document.activeElement !== maxEl) maxEl.value = max;
       valueEl.textContent = formatSliderValue(value);
     }
   }
@@ -516,6 +531,26 @@ export function PlotPanel({
     scheduleResampleImmediate();
   }
 
+  // Edits a slider's min/max bound. Rejects a bound that would make min >= max (silently
+  // ignored - the input just doesn't take the keystroke; harmless while the user's mid-type,
+  // e.g. typing "-10" briefly passes through "-1") and clamps the current value into the new
+  // range so an out-of-range value can't linger once its bound has moved past it.
+  function setSliderRange(id, name, field, rawValue) {
+    const row = rows.find((r) => r.id === id);
+    const slider = row?.sliders[name];
+    if (!slider) return;
+    const num = parseFloat(rawValue);
+    if (Number.isNaN(num)) return;
+    const min = field === 'min' ? num : slider.min;
+    const max = field === 'max' ? num : slider.max;
+    if (min >= max) return;
+    const value = Math.min(Math.max(slider.value, min), max);
+    rows = rows.map((r) => (r.id === id ? { ...r, sliders: { ...r.sliders, [name]: { ...r.sliders[name], min, max, value } } } : r));
+    onRowsChange(rows);
+    renderRows();
+    scheduleResample();
+  }
+
   // Adds/drops sliders to match each row's currently-detected plot parameters (see
   // lib/plotParams.js) - run at the top of every renderRows() so it stays in sync whether
   // rows changed (a param typed in or out) or `definitions` did (a param just got assigned in
@@ -600,6 +635,7 @@ export function PlotPanel({
           onColorChange: (color) => setColor(row.id, color),
           onRemove: () => removeRow(row.id),
           onSliderChange: (name, value) => setSliderValue(row.id, name, value),
+          onSliderRangeChange: (name, field, value) => setSliderRange(row.id, name, field, value),
         });
         rowViews.set(row.id, view);
       }
