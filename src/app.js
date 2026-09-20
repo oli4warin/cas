@@ -28,9 +28,11 @@ import { VariablesMenu } from './components/variablesMenu.js';
 import { FunctionsMenu } from './components/functionsMenu.js';
 import { DistributionMenu } from './components/distributionMenu.js';
 import { RegressionMenu } from './components/regressionMenu.js';
+import { SysSolveMenu } from './components/sysSolveMenu.js';
 import { XCAS_COMMANDS } from './lib/xcasCommands.js';
 import { findDistributionMenu } from './lib/distributionParams.js';
 import { isRegressionMenuCommand } from './lib/regressionParams.js';
+import { isSysSolveMenuCommand } from './lib/sysSolveParams.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -282,6 +284,14 @@ export function mountApp(root) {
     },
     onCancel: () => input.focus(),
   });
+  const sysSolveMenu = SysSolveMenu({
+    onSubmit: (expr) => {
+      input.value = expr;
+      submit({ force: true });
+      input.focus();
+    },
+    onCancel: () => input.focus(),
+  });
   const settingsMenu = SettingsMenu({
     onAngleModeChange: handleAngleModeChange,
     onApproxChange: handleApproxModeChange,
@@ -481,6 +491,7 @@ export function mountApp(root) {
   root.appendChild(layout);
   root.appendChild(distributionMenu.root);
   root.appendChild(regressionMenu.root);
+  root.appendChild(sysSolveMenu.root);
 
   // ---------- rendering helpers ----------
 
@@ -668,6 +679,10 @@ export function mountApp(root) {
     }
     if (isRegressionMenuCommand(trimmed)) {
       regressionMenu.open();
+      return true;
+    }
+    if (isSysSolveMenuCommand(trimmed)) {
+      sysSolveMenu.open();
       return true;
     }
     return false;

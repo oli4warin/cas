@@ -27,6 +27,7 @@ const CATEGORIES = [
     title: 'Algebra',
     items: [
       { label: 'solve(eqn, x)', hint: 'solve an equation', prefix: 'solve(', suffix: '=0,x)' },
+      { label: 'syssolve', hint: 'solve a system of equations', prefix: 'syssolve', suffix: '' },
       { label: 'factor(expr)', hint: 'factor an expression', prefix: 'factor(', suffix: ')' },
       { label: 'expand(expr)', hint: 'expand an expression', prefix: 'expand(', suffix: ')' },
       { label: 'simplify(expr)', hint: 'simplify an expression', prefix: 'simplify(', suffix: ')' },
