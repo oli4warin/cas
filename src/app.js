@@ -265,7 +265,7 @@ export function mountApp(root) {
   const printBtn = h('button', { type: 'button', class: 'header__plotBtn', onclick: () => window.print() }, 'Print');
   const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, 'Plot');
   const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, 'Table');
-  const functionsMenu = FunctionsMenu({ onInsert: insertSnippet });
+  const functionsMenu = FunctionsMenu({ onInsert: handleFunctionsMenuInsert });
   const distributionMenu = DistributionMenu({
     onSubmit: (expr) => {
       input.value = expr;
@@ -654,6 +654,31 @@ export function mountApp(root) {
 
   function insertSnippet(prefix, suffix) {
     insertAtCursor({ before: prefix, after: suffix }, { wrapSelection: true });
+  }
+
+  // Shared by the Enter-key handler and the hamburger FunctionsMenu: a bare command name
+  // (no parentheses/arguments yet) that has a parameter-entry menu built for it opens that
+  // menu instead of being left to error on evaluation. Returns true if a menu was opened.
+  function openMenuForBareCommand(value) {
+    const trimmed = value.trim();
+    const menu = findDistributionMenu(trimmed);
+    if (menu) {
+      distributionMenu.open(menu);
+      return true;
+    }
+    if (isRegressionMenuCommand(trimmed)) {
+      regressionMenu.open();
+      return true;
+    }
+    return false;
+  }
+
+  // FunctionsMenu items insert a bare command name (see functionsMenu.js's CATEGORIES) -
+  // if that leaves the input holding just that command, open its parameter menu right away
+  // instead of making the user press Enter first.
+  function handleFunctionsMenuInsert(prefix, suffix) {
+    insertSnippet(prefix, suffix);
+    openMenuForBareCommand(input.value);
   }
 
   // Moves the textarea's cursor the way the physical arrow keys would - used by the nav
@@ -1047,20 +1072,11 @@ export function mountApp(root) {
       // submit's `force` param) so the everyday key never second-guesses what was typed.
       // Ctrl+Enter (or Cmd+Enter) evaluates numerically instead of exactly.
       if (e.shiftKey) return;
-      // A bare distribution command name (no parentheses yet - see findDistributionMenu)
-      // opens a parameter menu instead of being submitted as-is, since evaluating it
+      // A bare command name (no parentheses/arguments yet - see openMenuForBareCommand)
+      // opens its parameter menu instead of being submitted as-is, since evaluating it
       // without arguments would just error.
-      const menu = findDistributionMenu(input.value.trim());
-      if (menu) {
+      if (openMenuForBareCommand(input.value)) {
         e.preventDefault();
-        distributionMenu.open(menu);
-        return;
-      }
-      // Same idea for the bare "regression" command (see isRegressionMenuCommand) - opens
-      // RegressionMenu to pick an x-list, a y-list and a curve type instead of erroring.
-      if (isRegressionMenuCommand(input.value.trim())) {
-        e.preventDefault();
-        regressionMenu.open();
         return;
       }
       e.preventDefault();
