@@ -1039,26 +1039,29 @@ export function mountApp(root) {
     const displayInput = normalizeMultilineInput(input.value) || state.history[state.history.length - 1]?.input || '';
     const expr = normalizeDelCommand(joinInputLines(displayInput));
     if (!expr || !engineReady || state.busy) return;
-    // Easter egg: typing the literal "paumode" toggles whether pi-multiple results are
-    // shown in multiples of pau (= 3/2*pi, see the "pau" constant above) instead of pi or
-    // tau - handled here, before it ever reaches the engine, since it isn't real Giac syntax.
+    // Easter eggs: typing one of these literal words toggles/selects how pi-multiple results
+    // are displayed - handled here, before any of them ever reaches the engine, since none is
+    // real Giac syntax. "paumode" toggles pau (= 3/2*pi, see the "pau" constant above) on or
+    // off, on top of whatever pi/tau choice is already in effect (see setPauMode/piToTau in
+    // lib/giac.js - pau wins over tau whenever both are on). "pimode"/"taumode" instead pick a
+    // side outright, the same explicit either/or choice as the settings menu's π/τ segmented
+    // control (see handleTauModeChange below, which also always turns pau back off - a
+    // deliberate "plain pi" or "tau" pick shouldn't keep being silently overridden by it).
     if (/^paumode$/i.test(expr.trim())) {
       state.pauMode = !state.pauMode;
       giacSetPauMode(state.pauMode);
       document.documentElement.classList.toggle('pau-mode', state.pauMode);
-      pushHistoryEntry({
-        input: displayInput,
-        raw: expr,
-        isError: false,
-        text: state.pauMode ? 'pau mode enabled' : 'pau mode disabled',
-        link: state.pauMode ? 'https://xkcd.com/1292/' : null,
-        latex: null,
-        isGraphics: false,
-      });
-      input.value = '';
-      state.navPos = -1;
-      updatePreview();
-      updateSelection();
+      finishModeCommandEntry(displayInput, expr, state.pauMode ? 'pau mode enabled' : 'pau mode disabled', state.pauMode ? 'https://xkcd.com/1292/' : null);
+      return;
+    }
+    if (/^pimode$/i.test(expr.trim())) {
+      handleTauModeChange(false);
+      finishModeCommandEntry(displayInput, expr, 'pi mode enabled');
+      return;
+    }
+    if (/^taumode$/i.test(expr.trim())) {
+      handleTauModeChange(true);
+      finishModeCommandEntry(displayInput, expr, 'tau mode enabled');
       return;
     }
     if (!force && looksIncomplete(expr)) {
@@ -1075,6 +1078,17 @@ export function mountApp(root) {
     renderStatus();
     pushHistoryEntry({ input: displayInput, ...result });
     setDefinitions(applyEntryToDefinitions(state.definitions, expr, result));
+    input.value = '';
+    state.navPos = -1;
+    updatePreview();
+    updateSelection();
+  }
+
+  // Shared tail of the "paumode"/"pimode"/"taumode" easter eggs above - pushes their
+  // announcement as a history entry and resets the input box exactly like a normal submit(),
+  // just without ever handing `expr` to the engine.
+  function finishModeCommandEntry(displayInput, expr, text, link = null) {
+    pushHistoryEntry({ input: displayInput, raw: expr, isError: false, text, link, latex: null, isGraphics: false });
     input.value = '';
     state.navPos = -1;
     updatePreview();

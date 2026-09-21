@@ -1561,7 +1561,14 @@ function piPowerToTauPau(s) {
       if (den === 1n) return num === 1n ? term : num === -1n ? `-${term}` : `${num}*${term}`;
       if (num === 1n) return `${term}/${den}`;
       if (num === -1n) return `-${term}/${den}`;
-      return `${num}*${term}/${den}`;
+      // "num*term/den" (no parens) and "num/den*term" both parse as *just* "term" divided by
+      // "den" with "num" multiplied in outside the fraction - Giac's own latex() (see
+      // fetchLatex in this file) then renders it split, "num\cdot\frac{term}{den}" or
+      // "\frac{num}{den}\cdot term", instead of the conventional single fraction with the
+      // whole numerator under the bar. Explicitly parenthesizing "num*term" as one group forces
+      // Giac to treat that product as the numerator, which is what makes latex() combine it
+      // into "\frac{num\cdot term}{den}".
+      return `(${num}*${term})/${den}`;
     },
   );
 }
@@ -1605,7 +1612,9 @@ function piToTau(s) {
     if (den === 1n) return num === 1n ? name : num === -1n ? `-${name}` : `${num}*${name}`;
     if (num === 1n) return `${name}/${den}`;
     if (num === -1n) return `-${name}/${den}`;
-    return `${num}*${name}/${den}`;
+    // "(num*name)/den" - see the matching comment in piPowerToTauPau above for why the
+    // explicit parens matter to Giac's own latex().
+    return `(${num}*${name})/${den}`;
   });
 }
 

@@ -46,6 +46,13 @@ const GREEK = {
   pau: '{\\pi\\hspace{-0.25em}\\tau}',
 };
 
+// The literal "paumode"/"pimode"/"taumode" easter-egg commands (see app.js's submit()) aren't
+// real Giac identifiers, so left alone they'd render as a plain italic variable name (each
+// letter slanted, run together) like any other unrecognized multi-letter identifier - a
+// command name should read as upright text instead, same as a recognized XCAS_COMMANDS name
+// (see operatorLabel below).
+const MODE_COMMANDS = new Set(['paumode', 'pimode', 'taumode']);
+
 const TRIG = {
   sin: '\\sin', cos: '\\cos', tan: '\\tan',
   asin: '\\arcsin', acos: '\\arccos', atan: '\\arctan',
@@ -321,6 +328,7 @@ function render(node) {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
       if (GREEK[lname]) return GREEK[lname] + primes;
+      if (MODE_COMMANDS.has(lname)) return operatorLabel(node.name) + primes;
       // Euler's constant is set upright ("\mathrm{e}"), same convention as Giac's own
       // latex() (see fixEulerConstant in lib/giac.js) - distinguishes it from an italic
       // variable, even though Giac itself never actually lets "e" be one (a bare "e" always
