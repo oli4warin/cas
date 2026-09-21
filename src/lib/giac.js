@@ -1154,12 +1154,16 @@ function parseSolveSolutions(raw, varNames) {
   // labeled would double up on the variable ("x=x>6"). A value that's already its own
   // top-level relation is shown as-is instead, dropping the "name[_idx]=" prefix entirely
   // (not just the "name=" part) since the value already says which variable it constrains.
+  // piToTau only touches this *display* copy of each value, never the plain `values`
+  // themselves - reinsertRaw/tuples below (raw/saveExpr's source, see formatSolveResult/
+  // buildSaveAssignment) stay in terms of pi, which is always valid Giac syntax; "tau" isn't
+  // bound to anything in the engine, so it'd be a broken reference if reinserted or saved.
   const clauses = tuples.map((values, idx) => {
     const suffix = tuples.length > 1 ? `_${idx + 1}` : '';
     return varNames
       .map((name, i) => {
         const value = values[i];
-        return hasTopLevelRelation(value) ? value : `${name}${suffix}=${value}`;
+        return hasTopLevelRelation(value) ? piToTau(value) : `${name}${suffix}=${piToTau(value)}`;
       })
       .join(' and ');
   });
@@ -1256,7 +1260,9 @@ function parseDesolveFuncName(sentExpr) {
 function formatDesolveResult(raw, funcName) {
   if (!funcName) return null;
   raw = reorderConstantRadicalSum(raw);
-  const clause = `${funcName}=${raw}`;
+  // `raw` itself stays pi-based (see piToTau's other call sites for why); only the
+  // displayed clause/text/latex use the tau-converted form.
+  const clause = `${funcName}=${piToTau(raw)}`;
   return { text: clause, latex: giacToLatex(clause) || null, raw };
 }
 
@@ -1446,6 +1452,80 @@ async function applyAutosimplify(out) {
   const wrapped = autosimplifyLevel === 2 ? `simplify(${out})` : `regroup(${out})`;
   const result = stripTrailingSemicolon(await rawEvalAsync(wrapped));
   return result.startsWith('GIAC_ERROR') ? out : result;
+}
+
+// Whether results should be expressed in terms of tau (= 2*pi) instead of pi - the
+// "tau/pi" setting (see app.js's settings menu). Giac itself has no native notion of this
+// (it doesn't know "tau" at all, let alone how to prefer it over pi - see piToTau below),
+// so unlike autosimplifyLevel above this is never told to the engine; it's purely this
+// module's own final-value rewrite, applied wherever an exact value is about to become part
+// of a result (see its call sites in evaluate()/evaluateApprox()/parseSolveSolutions/
+// formatSolveResultApprox/formatDesolveResult below).
+let tauMode = false;
+
+export function setTauMode(on) {
+  tauMode = on;
+}
+
+// Rewrites every "coefficient*pi" term in `s` (a piece of Giac syntax, e.g. a solve()
+// solution or a plain evaluated value) into the equivalent "coefficient'*tau" term, since
+// pi = tau/2 - "pi/2" becomes "tau/4", "2*pi/3" becomes "tau/3", "-1/2*pi" becomes "-tau/4".
+// Matches the handful of shapes Giac's own simplifier actually produces for a
+// pi coefficient: bare "pi", "N*pi", "pi/N", "N*pi/M", and solve()'s own "A/B*pi" (its
+// preferred spelling for a fractional coefficient, e.g. "-1/2*pi" for cos(x)=0's solutions) -
+// each optionally negated. A leading "-" is always folded into the match whether it's really
+// pi's own sign or a separate binary subtraction just before it ("3-pi" and "3-tau/2" mean
+// the same thing either way, so treating "-pi" as one unit is always safe here). Anything
+// that isn't one of these plain-rational-coefficient shapes (pi^2, sin(pi/7) - a poor
+// simplification Giac left unevaluated, etc.) is left untouched: this only ever converts the
+// linear terms that overwhelmingly make up real angle/trig results, not arbitrary pi-valued
+// expressions in general.
+// Each lookahead guards against "pi" being *raised to* a power ("pi^2/6") - there the
+// "coefficient" isn't a plain multiplicative factor at all, substituting it in as if it were
+// would silently change the value (e.g. naively turning "pi^2/6" into "tau/2^2/6" - Giac's
+// "/" and "*" precedence would then read that as "tau/4/6" = tau/24, not the intended
+// "(tau/2)^2/6" = tau^2/24). The other direction - "pi" itself used *as* an exponent, "2^pi"
+// or "2^-pi" - can't be caught with a lookbehind here without a regex engine retrying the
+// whole search one character later the moment the signed form fails to match (silently
+// matching the bare "pi" instead and reintroducing the same bug) - it's checked in the
+// callback below instead, against the true start of the whole match (sign included). Either
+// way, left untouched, same as any other non-linear pi expression this doesn't attempt to
+// handle.
+const PI_TERM_RE = /(-)?(?:(\d+)\/(\d+)\*pi(?!\^)|(\d+)\*pi\/(\d+)|pi\/(\d+)|(\d+)\*pi(?!\^)|pi(?!\^))\b/g;
+
+function piToTau(s) {
+  if (!tauMode || typeof s !== 'string' || !/\bpi\b/.test(s)) return s;
+  return s.replace(PI_TERM_RE, (match, sign, abNum, abDen, nmNum, nmDen, pnDen, nMul, offset, str) => {
+    if (str[offset - 1] === '^') return match; // "2^pi"/"2^-pi" - pi used as an exponent
+    let num;
+    let den;
+    if (abNum !== undefined) {
+      num = BigInt(abNum);
+      den = BigInt(abDen);
+    } else if (nmNum !== undefined) {
+      num = BigInt(nmNum);
+      den = BigInt(nmDen);
+    } else if (pnDen !== undefined) {
+      num = 1n;
+      den = BigInt(pnDen);
+    } else if (nMul !== undefined) {
+      num = BigInt(nMul);
+      den = 1n;
+    } else {
+      num = 1n;
+      den = 1n;
+    }
+    if (sign) num = -num;
+    // pi = tau/2, so (num/den)*pi = (num/(den*2))*tau.
+    den *= 2n;
+    const g = bigGcd(num, den) || 1n;
+    num /= g;
+    den /= g;
+    if (den === 1n) return num === 1n ? 'tau' : num === -1n ? '-tau' : `${num}*tau`;
+    if (num === 1n) return `tau/${den}`;
+    if (num === -1n) return `-tau/${den}`;
+    return `${num}*tau/${den}`;
+  });
 }
 
 function stripQuotes(s) {
@@ -1728,19 +1808,24 @@ export async function evaluate(expr, definitions) {
   if (tailMatch) {
     const [, exactPartRaw, decimalPart] = tailMatch;
     const exactPart = reorderConstantRadicalSum(exactPartRaw);
+    // `raw` always stays exactly what Giac gave back (pi, never tau - tau isn't bound to
+    // anything in the engine, so it'd be a broken reference if reinserted/copied/saved -
+    // see saveable.js) even when tau mode is on; only the *displayed* text/latex below use
+    // the tau-converted form (see piToTau).
+    const exactPartDisplay = piToTau(exactPart);
     if (parseDecimal(decimalPart) == null) {
       // Giac's own preview overflowed to "infinity"/"undef" - it carries no information, so
       // drop it and just show the exact value.
-      return { raw: exactPart, isError: false, text: exactPart, latex: await fetchLatex(exactPart), isGraphics: false };
+      return { raw: exactPart, isError: false, text: exactPartDisplay, latex: await fetchLatex(exactPartDisplay), isGraphics: false };
     }
     const rational = parseExactRational(exactPart);
     if (rational && rational.den === 1n && sameNumericValue(exactPart, decimalPart)) {
       // A plain integer short enough that Giac didn't need to round its own preview - it's
       // then just a redundant echo of the integer itself, so drop it entirely.
-      return { raw: exactPart, isError: false, text: exactPart, latex: await fetchLatex(exactPart), isGraphics: false };
+      return { raw: exactPart, isError: false, text: exactPartDisplay, latex: await fetchLatex(exactPartDisplay), isGraphics: false };
     }
     const exactDecimal = rational && rational.den !== 1n ? terminatingDecimalString(rational.num, rational.den) : null;
-    const leftLatex = await fetchLatex(exactPart);
+    const leftLatex = await fetchLatex(exactPartDisplay);
     if (exactDecimal) {
       // Our own recomputed decimal is verified exact, but displaying it can still mean
       // rounding it for the mantissa (see formatApproxSci) once it has more significant
@@ -1751,7 +1836,7 @@ export async function evaluate(expr, definitions) {
       return {
         raw: out,
         isError: false,
-        text: `${exactPart} = ${exactDecimal}`,
+        text: `${exactPartDisplay} = ${exactDecimal}`,
         latex: leftLatex != null ? `${leftLatex} ${approxDisplay ? '\\approx' : '='} ${sci ? sci.latex : exactDecimal}` : null,
         isGraphics: false,
       };
@@ -1760,7 +1845,7 @@ export async function evaluate(expr, definitions) {
     return {
       raw: out,
       isError: false,
-      text: `${exactPart} ≈ ${decimalPart}`,
+      text: `${exactPartDisplay} ≈ ${decimalPart}`,
       latex: leftLatex != null ? `${leftLatex} \\approx ${decimalSci ? decimalSci.latex : decimalPart}` : null,
       isGraphics: false,
     };
@@ -1789,12 +1874,15 @@ export async function evaluate(expr, definitions) {
   }
 
   const simplifiedOut = reorderConstantRadicalSum(await applyAutosimplify(out));
-  let latexOut = await fetchLatex(simplifiedOut);
+  // `raw` stays pi-based (see the tailMatch branch above for why); only text/latex show the
+  // tau-converted form.
+  const simplifiedOutDisplay = piToTau(simplifiedOut);
+  let latexOut = await fetchLatex(simplifiedOutDisplay);
   // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
   // unevaluated (e.g. "integrate(exp(sin(x)),x)") - that's not a Stammfunktion, and the
   // integral notation itself already stands for the whole family up to a constant.
   if (isIndefiniteIntegral(sentExpr) && !isIndefiniteIntegral(simplifiedOut)) latexOut = appendArbitraryConstant(latexOut);
-  return { raw: simplifiedOut, isError: false, text: simplifiedOut, latex: latexOut, isGraphics: false };
+  return { raw: simplifiedOut, isError: false, text: simplifiedOutDisplay, latex: latexOut, isGraphics: false };
 }
 
 function bigGcd(a, b) {
@@ -2045,8 +2133,9 @@ export async function evaluateApprox(expr, definitions) {
     if (desolvedExact) {
       return { raw: desolvedExact.raw, isError: false, text: desolvedExact.text, latex: desolvedExact.latex, isGraphics: false };
     }
-    const latexOut = await fetchLatex(out);
-    return { raw: out, isError: false, text: out, latex: latexOut, isGraphics: false };
+    const outDisplay = piToTau(out);
+    const latexOut = await fetchLatex(outDisplay);
+    return { raw: out, isError: false, text: outDisplay, latex: latexOut, isGraphics: false };
   }
 
   const approxUnquoted = stripQuotes(approxOut);

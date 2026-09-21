@@ -4,11 +4,12 @@ import { h } from '../lib/dom.js';
 // and plots alike, since they all share the one Giac session) - angle unit, whether
 // results are always numerically approximated instead of left exact, and how much
 // auto-simplification Giac applies after each evaluation.
-export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplifyChange, onThemeChange, onShowTextChange }) {
+export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplifyChange, onTauModeChange, onThemeChange, onShowTextChange }) {
   let open = false;
   let angleMode = 'RAD';
   let approx = false;
   let autosimplify = 1;
+  let tauMode = false;
   let showText = false;
   let theme = 'dark';
   let disabled = false;
@@ -22,6 +23,8 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
   const autosimplifyBtns = [0, 1, 2].map((level) =>
     h('button', { type: 'button', onclick: () => onAutosimplifyChange(level) }, String(level)),
   );
+  const piBtn = h('button', { type: 'button', onclick: () => onTauModeChange(false) }, 'π');
+  const tauBtn = h('button', { type: 'button', onclick: () => onTauModeChange(true) }, 'τ');
   const showTextInput = h('input', { type: 'checkbox', onchange: (e) => onShowTextChange(e.target.checked) });
   const themeThumb = h('span', { class: 'theme-switch__thumb' }, '☾');
   const themeSwitch = h(
@@ -56,6 +59,12 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
       { class: 'settings-menu__row' },
       h('span', { class: 'settings-menu__label', title: '0 = none, 1 = regroup, 2 = simplify' }, 'Autosimplify'),
       h('div', { class: 'settings-menu__segmented' }, ...autosimplifyBtns),
+    ),
+    h(
+      'div',
+      { class: 'settings-menu__row' },
+      h('span', { class: 'settings-menu__label', title: 'Express results containing pi using tau (= 2*pi) instead' }, 'π / τ'),
+      h('div', { class: 'settings-menu__segmented' }, piBtn, tauBtn),
     ),
     h(
       'label',
@@ -94,6 +103,10 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
       btn.className = level === autosimplify ? 'settings-menu__seg--active' : '';
       btn.disabled = disabled;
     });
+    piBtn.className = tauMode ? '' : 'settings-menu__seg--active';
+    tauBtn.className = tauMode ? 'settings-menu__seg--active' : '';
+    piBtn.disabled = disabled;
+    tauBtn.disabled = disabled;
     showTextInput.checked = showText;
     themeSwitch.classList.toggle('theme-switch--light', theme === 'light');
     themeSwitch.setAttribute('aria-checked', theme === 'light');
@@ -114,6 +127,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
     angleMode = state.angleMode;
     approx = state.approx;
     autosimplify = state.autosimplify;
+    tauMode = state.tauMode;
     showText = state.showText;
     theme = state.theme;
     disabled = state.disabled;

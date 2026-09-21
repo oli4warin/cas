@@ -11,6 +11,7 @@ import {
   normalizeDelCommand,
   evaluateRaw as giacEvaluateRaw,
   setAutosimplifyLevel as giacSetAutosimplifyLevel,
+  setTauMode as giacSetTauMode,
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
@@ -67,6 +68,13 @@ function getInitialShowText() {
 function getInitialToolbarVisible() {
   try {
     return localStorage.getItem('toolbarVisible') === '1';
+  } catch {
+    return false;
+  }
+}
+function getInitialTauMode() {
+  try {
+    return localStorage.getItem('tauMode') === '1';
   } catch {
     return false;
   }
@@ -245,11 +253,17 @@ export function mountApp(root) {
     angleMode: 'RAD',
     approxMode: false,
     autosimplify: 1, // 0=none, 1=regroup, 2=simplify - matches evaluate()'s own default in giac.js
+    tauMode: getInitialTauMode(),
     theme: getInitialTheme(),
     showText: getInitialShowText(),
     toolbarVisible: getInitialToolbarVisible(),
     hintsVisible: getInitialHintsVisible(),
   };
+  // Purely a display preference (see piToTau in giac.js - it never changes what's actually
+  // computed, only how a pi-valued result is shown), so unlike angleMode/approxMode/
+  // autosimplify below it needs no "re-apply once the engine is ready" step - giac.js's own
+  // module-level flag just needs to start out matching the persisted value.
+  giacSetTauMode(state.tauMode);
 
   const sessionId = makeSessionId();
   // Snapshot of the rows/view being handed off to a popped-out window, taken at the
@@ -298,6 +312,7 @@ export function mountApp(root) {
     onAngleModeChange: handleAngleModeChange,
     onApproxChange: handleApproxModeChange,
     onAutosimplifyChange: handleAutosimplifyChange,
+    onTauModeChange: handleTauModeChange,
     onThemeChange: handleThemeChange,
     onShowTextChange: handleShowTextChange,
   });
@@ -529,7 +544,15 @@ export function mountApp(root) {
     stopBtn.style.display = state.busy ? '' : 'none';
 
     functionsMenu.setDisabled(!engineReady);
-    settingsMenu.update({ angleMode: state.angleMode, approx: state.approxMode, autosimplify: state.autosimplify, showText: state.showText, theme: state.theme, disabled: !engineReady || state.busy });
+    settingsMenu.update({
+      angleMode: state.angleMode,
+      approx: state.approxMode,
+      autosimplify: state.autosimplify,
+      tauMode: state.tauMode,
+      showText: state.showText,
+      theme: state.theme,
+      disabled: !engineReady || state.busy,
+    });
 
     for (const btn of toolbar.querySelectorAll('button')) btn.disabled = !engineReady;
   }
@@ -1279,6 +1302,21 @@ export function mountApp(root) {
   function handleAutosimplifyChange(level) {
     state.autosimplify = level;
     giacSetAutosimplifyLevel(level);
+    renderStatus();
+  }
+
+  // Like angleMode/approxMode/autosimplify above, this only affects evaluations from this
+  // point forward - an existing history entry keeps showing whatever it already computed
+  // (its text/latex are fixed strings from evaluate()-time, see piToTau in giac.js), the
+  // same way switching RAD/DEG never retroactively reformats a past result either.
+  function handleTauModeChange(on) {
+    state.tauMode = on;
+    giacSetTauMode(on);
+    try {
+      localStorage.setItem('tauMode', on ? '1' : '0');
+    } catch {
+      // Ignore - the preference just won't persist across reloads in this environment.
+    }
     renderStatus();
   }
 
