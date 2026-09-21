@@ -56,13 +56,13 @@ function spawnWorker() {
   };
 }
 
-// Constants Giac doesn't already provide natively - just `tau` (2*pi) so far - defined once
-// per worker instance right after the engine finishes loading, and before any real request
-// can reach it (see ensureGiacLoaded below): both callers attach their `.then` to the same
-// readyPromise, in this attachment order, and the worker runs messages strictly in the order
-// it receives them, so this is always the first `caseval` the engine sees. restart() spawns
-// a fresh engine with no memory of it, hence resetting preludeSent there.
-const PRELUDE_EXPR = 'tau:=2*pi;';
+// Constants Giac doesn't already provide natively - `tau` (2*pi) and `pau` (3/2*pi) so far -
+// defined once per worker instance right after the engine finishes loading, and before any
+// real request can reach it (see ensureGiacLoaded below): both callers attach their `.then`
+// to the same readyPromise, in this attachment order, and the worker runs messages strictly
+// in the order it receives them, so this is always the first `caseval` the engine sees.
+// restart() spawns a fresh engine with no memory of it, hence resetting preludeSent there.
+const PRELUDE_EXPR = 'tau:=2*pi; pau:=3/2*pi;';
 
 export function ensureGiacLoaded() {
   if (!worker) spawnWorker();
@@ -615,7 +615,7 @@ function splitTopLevelKeyword(s, word) {
 // themselves "the unknown" - `and`-joining equations for solve(), or names like `pi`/`i`
 // that already have a fixed meaning to Giac.
 const EQUATION_KEYWORDS = new Set(['and', 'or', 'not', 'xor', 'true', 'false']);
-const BUILTIN_CONSTANT_NAMES = new Set(['pi', 'e', 'i', 'inf', 'infinity', 'euler_gamma', 'tau']);
+const BUILTIN_CONSTANT_NAMES = new Set(['pi', 'e', 'i', 'inf', 'infinity', 'euler_gamma', 'tau', 'pau']);
 const FREE_VAR_IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
 
 // Collects the identifiers in `s` that stand for an unknown to solve for, in first-appearance
@@ -1467,6 +1467,16 @@ export function setTauMode(on) {
   tauMode = on;
 }
 
+// The "paumode" easter egg (see the literal "paumode" command handled in app.js's submit())
+// - once typed and entered, every pi-multiple result is expressed in multiples of pau
+// (= 3/2*pi) instead, taking priority over tauMode above (a result can't be shown in both
+// tau and pau at once, so pau wins whenever both are on).
+let pauMode = false;
+
+export function setPauMode(on) {
+  pauMode = on;
+}
+
 // Rewrites every "coefficient*pi" term in `s` (a piece of Giac syntax, e.g. a solve()
 // solution or a plain evaluated value) into the equivalent "coefficient'*tau" term, since
 // pi = tau/2 - "pi/2" becomes "tau/4", "2*pi/3" becomes "tau/3", "-1/2*pi" becomes "-tau/4".
@@ -1494,7 +1504,11 @@ export function setTauMode(on) {
 const PI_TERM_RE = /(-)?(?:(\d+)\/(\d+)\*pi(?!\^)|(\d+)\*pi\/(\d+)|pi\/(\d+)|(\d+)\*pi(?!\^)|pi(?!\^))\b/g;
 
 function piToTau(s) {
-  if (!tauMode || typeof s !== 'string' || !/\bpi\b/.test(s)) return s;
+  if (!tauMode && !pauMode) return s;
+  if (typeof s !== 'string' || !/\bpi\b/.test(s)) return s;
+  // pauMode wins whenever both are on (see its declaration above) - pi = (2/3)*pau, vs.
+  // tau's pi = tau/2, so (num/den)*pi becomes (num*2/(den*3))*pau instead of (num/(den*2))*tau.
+  const name = pauMode ? 'pau' : 'tau';
   return s.replace(PI_TERM_RE, (match, sign, abNum, abDen, nmNum, nmDen, pnDen, nMul, offset, str) => {
     if (str[offset - 1] === '^') return match; // "2^pi"/"2^-pi" - pi used as an exponent
     let num;
@@ -1516,15 +1530,19 @@ function piToTau(s) {
       den = 1n;
     }
     if (sign) num = -num;
-    // pi = tau/2, so (num/den)*pi = (num/(den*2))*tau.
-    den *= 2n;
+    if (pauMode) {
+      num *= 2n;
+      den *= 3n;
+    } else {
+      den *= 2n;
+    }
     const g = bigGcd(num, den) || 1n;
     num /= g;
     den /= g;
-    if (den === 1n) return num === 1n ? 'tau' : num === -1n ? '-tau' : `${num}*tau`;
-    if (num === 1n) return `tau/${den}`;
-    if (num === -1n) return `-tau/${den}`;
-    return `${num}*tau/${den}`;
+    if (den === 1n) return num === 1n ? name : num === -1n ? `-${name}` : `${num}*${name}`;
+    if (num === 1n) return `${name}/${den}`;
+    if (num === -1n) return `-${name}/${den}`;
+    return `${num}*${name}/${den}`;
   });
 }
 
@@ -1585,6 +1603,18 @@ function fixEulerConstant(latex) {
 const IMAGINARY_UNIT_RE = /\bi\b/g;
 function fixImaginaryUnit(latex) {
   return latex.replace(IMAGINARY_UNIT_RE, '\\mathrm{i}');
+}
+
+// Giac's own latex() has no notion of "pau" (unlike "tau" - see the piToTau comment above,
+// Giac happens to already recognize the standard Greek letter names, but "pau" is a made-up
+// portmanteau, not one of them) - it comes back as a plain, italic multi-letter identifier.
+// Rewrite it to the same pi-tau-overlap glyph giacToLatex.js's own GREEK table uses for the
+// live preview, so a "paumode" result (see setPauMode/piToTau above) matches what was typed.
+// Braced so a following "^"/"_" groups only the symbol, not whatever comes after it.
+const PAU_SYMBOL = '\\pi\\hspace{-0.52em}\\tau\\hspace{0.52em}';
+const PAU_RE = /\bpau\b/g;
+function fixPauSymbol(latex) {
+  return latex.replace(PAU_RE, `{${PAU_SYMBOL}}`);
 }
 
 // Giac's own latex() for an integral it couldn't resolve to a closed form (e.g.
@@ -1745,16 +1775,18 @@ async function fetchLatex(out) {
   // corrupted every matrix/piecewise ("\begin{cases}") result into a single garbled row.
   return fixNegatedSqrtParens(
     fixDifferentialD(
-      fixImaginaryUnit(
-        fixEulerConstant(
-          fixScientificNotation(
-            stripQuotes(latexOut)
-              .replace(/\\"/g, '"')
-              // Giac's own latex() has a bug for squared trig functions: it emits e.g.
-              // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
-              // MathJax read it as the circumflex-accent command instead of a superscript.
-              // Drop that backslash so "\^{" renders as the intended "^{".
-              .replace(/\\\^\{/g, '^{'),
+      fixPauSymbol(
+        fixImaginaryUnit(
+          fixEulerConstant(
+            fixScientificNotation(
+              stripQuotes(latexOut)
+                .replace(/\\"/g, '"')
+                // Giac's own latex() has a bug for squared trig functions: it emits e.g.
+                // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
+                // MathJax read it as the circumflex-accent command instead of a superscript.
+                // Drop that backslash so "\^{" renders as the intended "^{".
+                .replace(/\\\^\{/g, '^{'),
+            ),
           ),
         ),
       ),

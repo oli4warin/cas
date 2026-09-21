@@ -36,7 +36,11 @@ const GREEK = {
   pi: '\\pi', theta: '\\theta', alpha: '\\alpha', beta: '\\beta', gamma: '\\gamma',
   delta: '\\delta', lambda: '\\lambda', mu: '\\mu', sigma: '\\sigma', phi: '\\varphi',
   omega: '\\omega', infinity: '\\infty', inf: '\\infty', epsilon: '\\varepsilon',
-	kappa: '\\kappa', nu: '\\nu', tau: '\\tau', psi: '\\psi', chi: '\\chi'
+	kappa: '\\kappa', nu: '\\nu', tau: '\\tau', psi: '\\psi', chi: '\\chi',
+  // MathJax's TeX input only implements the plain (breakable) "\hspace{}", not the starred
+  // "\hspace*{}" (an ordinary LaTeX primitive it never defines) - using the starred form here
+  // throws "Missing dimension or its units for \hspace" instead of rendering anything.
+  pau: '\\pi\\hspace{-0.52em}\\tau\\hspace{0.52em}',
 };
 
 const TRIG = {

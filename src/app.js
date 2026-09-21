@@ -12,6 +12,7 @@ import {
   evaluateRaw as giacEvaluateRaw,
   setAutosimplifyLevel as giacSetAutosimplifyLevel,
   setTauMode as giacSetTauMode,
+  setPauMode as giacSetPauMode,
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
@@ -254,6 +255,7 @@ export function mountApp(root) {
     approxMode: false,
     autosimplify: 1, // 0=none, 1=regroup, 2=simplify - matches evaluate()'s own default in giac.js
     tauMode: getInitialTauMode(),
+    pauMode: false, // the "paumode" easter egg (see submit()) - never persisted, session-only
     theme: getInitialTheme(),
     showText: getInitialShowText(),
     toolbarVisible: getInitialToolbarVisible(),
@@ -1037,6 +1039,26 @@ export function mountApp(root) {
     const displayInput = normalizeMultilineInput(input.value) || state.history[state.history.length - 1]?.input || '';
     const expr = normalizeDelCommand(joinInputLines(displayInput));
     if (!expr || !engineReady || state.busy) return;
+    // Easter egg: typing the literal "paumode" toggles whether pi-multiple results are
+    // shown in multiples of pau (= 3/2*pi, see the "pau" constant above) instead of pi or
+    // tau - handled here, before it ever reaches the engine, since it isn't real Giac syntax.
+    if (/^paumode$/i.test(expr.trim())) {
+      state.pauMode = !state.pauMode;
+      giacSetPauMode(state.pauMode);
+      pushHistoryEntry({
+        input: displayInput,
+        raw: expr,
+        isError: false,
+        text: state.pauMode ? 'pau mode enabled' : 'pau mode disabled',
+        latex: null,
+        isGraphics: false,
+      });
+      input.value = '';
+      state.navPos = -1;
+      updatePreview();
+      updateSelection();
+      return;
+    }
     if (!force && looksIncomplete(expr)) {
       state.warning = 'This expression looks unfinished (dangling operator or unmatched parenthesis) - evaluating it can take a very long time. Press Enter to run it anyway.';
       renderWarning();
