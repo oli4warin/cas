@@ -44,6 +44,23 @@
   color-scheme: light;
 }
 
+/* Pau mode (see the "paumode" easter egg in app.js/giac.js) swaps the accent hues to the
+   same purple/gold pair the const/vars keyboard groups already use (app.css), so every
+   accent-colored element - prompts, borders, buttons - visibly shifts once it's on. */
+:root.pau-mode {
+  --accent: #b18cf0;
+  --accent-2: #e0a940;
+  --accent-bg: #241a33;
+  --accent-border: #5c4a86;
+}
+
+:root[data-theme='light'].pau-mode {
+  --accent: #6b46b0;
+  --accent-2: #a06a0a;
+  --accent-bg: #efe7fa;
+  --accent-border: #c9b6ea;
+}
+
 * {
   box-sizing: border-box;
 }

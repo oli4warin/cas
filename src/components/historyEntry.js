@@ -30,7 +30,23 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
 
   const resultMath = h('span', { class: 'entry__math' });
   const errorText = h('span', { class: 'entry__errorText' }, entry.text);
-  const plainText = h('span', { class: 'entry__plainText' }, entry.text);
+  // The "pau mode enabled" easter-egg message (see submit() in app.js) carries a link to
+  // the xkcd comic it's riffing on - stopPropagation keeps the click from also bubbling to
+  // outputRow's onclick (which would otherwise copy the text to the clipboard at the same
+  // time as the link opens).
+  const plainText = entry.link
+    ? h(
+        'a',
+        {
+          class: 'entry__plainText entry__pauLink',
+          href: entry.link,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          onclick: (e) => e.stopPropagation(),
+        },
+        entry.text,
+      )
+    : h('span', { class: 'entry__plainText' }, entry.text);
   const outputRawText = h('span', { class: 'entry__rawText' }, entry.text);
   const outputCopied = h('span', { class: 'entry__copied' }, 'Copied');
   outputCopied.style.display = 'none';

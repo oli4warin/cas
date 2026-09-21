@@ -62,7 +62,7 @@ function spawnWorker() {
 // to the same readyPromise, in this attachment order, and the worker runs messages strictly
 // in the order it receives them, so this is always the first `caseval` the engine sees.
 // restart() spawns a fresh engine with no memory of it, hence resetting preludeSent there.
-const PRELUDE_EXPR = 'tau:=2*pi; pau:=3/2*pi;';
+const PRELUDE_EXPR = 'tau:=2*pi; pau:=(3/2)*pi;';
 
 export function ensureGiacLoaded() {
   if (!worker) spawnWorker();
@@ -1486,10 +1486,12 @@ export function setPauMode(on) {
 // each optionally negated. A leading "-" is always folded into the match whether it's really
 // pi's own sign or a separate binary subtraction just before it ("3-pi" and "3-tau/2" mean
 // the same thing either way, so treating "-pi" as one unit is always safe here). Anything
-// that isn't one of these plain-rational-coefficient shapes (pi^2, sin(pi/7) - a poor
+// that isn't one of these plain-rational-coefficient shapes (sin(pi/7) - a poor
 // simplification Giac left unevaluated, etc.) is left untouched: this only ever converts the
 // linear terms that overwhelmingly make up real angle/trig results, not arbitrary pi-valued
-// expressions in general.
+// expressions in general. "pi" raised to a power (e.g. "pi^2/6") is a plain-rational
+// coefficient shape too, just not a *linear* one - see PI_POWER_TERM_RE/piPowerToTauPau below,
+// which handles that case separately and runs before this one.
 // Each lookahead guards against "pi" being *raised to* a power ("pi^2/6") - there the
 // "coefficient" isn't a plain multiplicative factor at all, substituting it in as if it were
 // would silently change the value (e.g. naively turning "pi^2/6" into "tau/2^2/6" - Giac's
@@ -1503,13 +1505,74 @@ export function setPauMode(on) {
 // handle.
 const PI_TERM_RE = /(-)?(?:(\d+)\/(\d+)\*pi(?!\^)|(\d+)\*pi\/(\d+)|pi\/(\d+)|(\d+)\*pi(?!\^)|pi(?!\^))\b/g;
 
+// Same idea as PI_TERM_RE just above, but for "pi" raised to an integer power - Giac commonly
+// produces these for closed forms like zeta(2) = pi^2/6 or zeta(4) = pi^4/90. Mirrors
+// PI_TERM_RE's four coefficient shapes (plus the bare case), just with "pi" replaced by
+// "pi^N" throughout. Run before PI_TERM_RE (see piToTau) so its own "pi(?!\^)" lookaheads
+// still see the untouched "pi^N" text and correctly leave it alone.
+// pi^N = (tau/2)^N = tau^N/2^N in tau mode, or pi^N = ((2/3)*pau)^N = 2^N*pau^N/3^N in pau
+// mode - so the coefficient in front is rescaled by 2^N (tau) or 2^N/3^N (pau) while the
+// exponent N itself just carries straight over onto the new symbol.
+const PI_POWER_TERM_RE =
+  /(-)?(?:(\d+)\/(\d+)\*pi\^(\d+)|(\d+)\*pi\^(\d+)\/(\d+)|pi\^(\d+)\/(\d+)|(\d+)\*pi\^(\d+)|pi\^(\d+))\b/g;
+
+function piPowerToTauPau(s) {
+  if (!tauMode && !pauMode) return s;
+  if (typeof s !== 'string' || !/\bpi\^/.test(s)) return s;
+  const name = pauMode ? 'pau' : 'tau';
+  return s.replace(
+    PI_POWER_TERM_RE,
+    (match, sign, abNum, abDen, abPow, nmNum, nmPow, nmDen, pnPow, pnDen, nMulNum, nMulPow, barePow) => {
+      let num;
+      let den;
+      let pow;
+      if (abNum !== undefined) {
+        num = BigInt(abNum);
+        den = BigInt(abDen);
+        pow = BigInt(abPow);
+      } else if (nmNum !== undefined) {
+        num = BigInt(nmNum);
+        den = BigInt(nmDen);
+        pow = BigInt(nmPow);
+      } else if (pnPow !== undefined) {
+        num = 1n;
+        den = BigInt(pnDen);
+        pow = BigInt(pnPow);
+      } else if (nMulNum !== undefined) {
+        num = BigInt(nMulNum);
+        den = 1n;
+        pow = BigInt(nMulPow);
+      } else {
+        num = 1n;
+        den = 1n;
+        pow = BigInt(barePow);
+      }
+      if (sign) num = -num;
+      if (pauMode) {
+        num *= 2n ** pow;
+        den *= 3n ** pow;
+      } else {
+        den *= 2n ** pow;
+      }
+      const g = bigGcd(num, den) || 1n;
+      num /= g;
+      den /= g;
+      const term = `${name}^${pow}`;
+      if (den === 1n) return num === 1n ? term : num === -1n ? `-${term}` : `${num}*${term}`;
+      if (num === 1n) return `${term}/${den}`;
+      if (num === -1n) return `-${term}/${den}`;
+      return `${num}*${term}/${den}`;
+    },
+  );
+}
+
 function piToTau(s) {
   if (!tauMode && !pauMode) return s;
   if (typeof s !== 'string' || !/\bpi\b/.test(s)) return s;
   // pauMode wins whenever both are on (see its declaration above) - pi = (2/3)*pau, vs.
   // tau's pi = tau/2, so (num/den)*pi becomes (num*2/(den*3))*pau instead of (num/(den*2))*tau.
   const name = pauMode ? 'pau' : 'tau';
-  return s.replace(PI_TERM_RE, (match, sign, abNum, abDen, nmNum, nmDen, pnDen, nMul, offset, str) => {
+  return piPowerToTauPau(s).replace(PI_TERM_RE, (match, sign, abNum, abDen, nmNum, nmDen, pnDen, nMul, offset, str) => {
     if (str[offset - 1] === '^') return match; // "2^pi"/"2^-pi" - pi used as an exponent
     let num;
     let den;

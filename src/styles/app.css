@@ -497,6 +497,17 @@
   color: var(--error);
 }
 
+.entry__pauLink {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 2px;
+}
+
+.entry__pauLink:hover {
+  text-decoration-color: var(--accent);
+}
+
 .entry__math {
   font-size: 15px;
   /* MathJax's CHTML output is a run of many small inline elements (one per glyph/token),

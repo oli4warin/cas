@@ -40,7 +40,10 @@ const GREEK = {
   // MathJax's TeX input only implements the plain (breakable) "\hspace{}", not the starred
   // "\hspace*{}" (an ordinary LaTeX primitive it never defines) - using the starred form here
   // throws "Missing dimension or its units for \hspace" instead of rendering anything.
-  pau: '\\pi\\hspace{-0.25em}\\tau',
+  // Braced into one group (matching fixPauSymbol's own wrapping in lib/giac.js) so a power
+  // typed right after it (e.g. "pau^2", from piToTau's pauMode-power conversion) attaches to
+  // the whole symbol via renderPowerBase below, not just to its trailing "\tau" token.
+  pau: '{\\pi\\hspace{-0.25em}\\tau}',
 };
 
 const TRIG = {

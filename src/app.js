@@ -1045,11 +1045,13 @@ export function mountApp(root) {
     if (/^paumode$/i.test(expr.trim())) {
       state.pauMode = !state.pauMode;
       giacSetPauMode(state.pauMode);
+      document.documentElement.classList.toggle('pau-mode', state.pauMode);
       pushHistoryEntry({
         input: displayInput,
         raw: expr,
         isError: false,
         text: state.pauMode ? 'pau mode enabled' : 'pau mode disabled',
+        link: state.pauMode ? 'https://xkcd.com/1292/' : null,
         latex: null,
         isGraphics: false,
       });
@@ -1347,6 +1349,14 @@ export function mountApp(root) {
   function handleTauModeChange(on) {
     state.tauMode = on;
     giacSetTauMode(on);
+    // Explicitly picking pi or tau is a deliberate choice of unit - pau mode (which
+    // otherwise wins over tau mode, see piToTau in giac.js) shouldn't silently keep
+    // overriding it from here on.
+    if (state.pauMode) {
+      state.pauMode = false;
+      giacSetPauMode(false);
+      document.documentElement.classList.remove('pau-mode');
+    }
     try {
       localStorage.setItem('tauMode', on ? '1' : '0');
     } catch {
