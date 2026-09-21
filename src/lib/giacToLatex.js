@@ -40,7 +40,7 @@ const GREEK = {
   // MathJax's TeX input only implements the plain (breakable) "\hspace{}", not the starred
   // "\hspace*{}" (an ordinary LaTeX primitive it never defines) - using the starred form here
   // throws "Missing dimension or its units for \hspace" instead of rendering anything.
-  pau: '\\pi\\hspace{-0.52em}\\tau\\hspace{0.52em}',
+  pau: '\\pi\\hspace{-0.25em}\\tau',
 };
 
 const TRIG = {
