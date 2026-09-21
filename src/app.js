@@ -18,7 +18,7 @@ import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
 import { applyEntryToDefinitions } from './lib/definitions.js';
 import { plottableExprForEntry } from './lib/plottable.js';
-import { saveableExprForEntry } from './lib/saveable.js';
+import { saveableForEntry } from './lib/saveable.js';
 import { displayListIndexAliases } from './lib/listIndexAlias.js';
 import { startBridgeHost } from './lib/plotBridge.js';
 import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
@@ -31,6 +31,7 @@ import { SettingsMenu } from './components/settingsMenu.js';
 import { VariablesMenu } from './components/variablesMenu.js';
 import { FunctionsMenu } from './components/functionsMenu.js';
 import { DistributionMenu } from './components/distributionMenu.js';
+import { SaveMenu } from './components/saveMenu.js';
 import { RegressionMenu } from './components/regressionMenu.js';
 import { SysSolveMenu } from './components/sysSolveMenu.js';
 import { XCAS_COMMANDS } from './lib/xcasCommands.js';
@@ -302,6 +303,13 @@ export function mountApp(root) {
     },
     onCancel: () => input.focus(),
   });
+  const saveMenu = SaveMenu({
+    onSubmit: (expr) => {
+      saveEntryVariables(expr);
+      input.focus();
+    },
+    onCancel: () => input.focus(),
+  });
   const sysSolveMenu = SysSolveMenu({
     onSubmit: (expr) => {
       input.value = expr;
@@ -511,6 +519,7 @@ export function mountApp(root) {
   root.appendChild(distributionMenu.root);
   root.appendChild(regressionMenu.root);
   root.appendChild(sysSolveMenu.root);
+  root.appendChild(saveMenu.root);
 
   // ---------- rendering helpers ----------
 
@@ -636,7 +645,7 @@ export function mountApp(root) {
       onSelect: selectHistory,
       onDelete: deleteEntry,
       onPlot: (i, expr) => addExpressionToPlot(expr),
-      onSave: (i, expr) => saveEntryVariables(expr),
+      onSave: (i, info) => saveMenu.open(info),
       definitions: state.definitions,
     });
     view.setShowText(state.showText);
@@ -668,7 +677,7 @@ export function mountApp(root) {
         onSelect: selectHistory,
         onDelete: deleteEntry,
         onPlot: (idx, expr) => addExpressionToPlot(expr),
-        onSave: (idx, expr) => saveEntryVariables(expr),
+        onSave: (idx, info) => saveMenu.open(info),
         definitions: state.definitions,
       });
       view.setShowText(state.showText);
@@ -1104,22 +1113,26 @@ export function mountApp(root) {
 
   // Shared tail of the "paumode"/"pimode"/"taumode" easter eggs above - pushes their
   // announcement as a history entry and resets the input box exactly like a normal submit(),
-  // just without ever handing `expr` to the engine.
+  // just without ever handing `expr` to the engine. isCommand marks it as not a real
+  // evaluation, so saveableForEntry (lib/saveable.js) doesn't offer to save `expr` itself
+  // (e.g. the bare word "paumode") as if it were a computed value.
   function finishModeCommandEntry(displayInput, expr, text, link = null) {
-    pushHistoryEntry({ input: displayInput, raw: expr, isError: false, text, link, latex: null, isGraphics: false });
+    pushHistoryEntry({ input: displayInput, raw: expr, isError: false, text, link, latex: null, isGraphics: false, isCommand: true });
     input.value = '';
     state.navPos = -1;
     updatePreview();
     updateSelection();
   }
 
-  // Runs a solved entry's own ready-made assignment statement (see saveExpr/saveableExprForEntry)
-  // exactly like submit() would if the user had typed and pressed Enter on it - pushes its own
-  // new history entry and folds the resulting definitions in - but without touching the CAS
-  // input box at all (unlike submit(), which always reads/clears `input.value`), since the
-  // user didn't type this: the entry's own "save" button (or the "s" shortcut) did. Wired to
-  // both (see pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
-  // handleKeyDown below), same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
+  // Runs the "name:=value" (or "f(x):=value") assignment the save menu just built (see
+  // saveMenu.js/saveableForEntry) exactly like submit() would if the user had typed and
+  // pressed Enter on it - pushes its own new history entry and folds the resulting
+  // definitions in - but without touching the CAS input box at all (unlike submit(), which
+  // always reads/clears `input.value`), since the user didn't type this into it: they typed
+  // a name into the save menu instead. Wired as that menu's onSubmit (see its construction
+  // above), which is opened by the entry's own "save" button (or the "s" shortcut) - see
+  // pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
+  // handleKeyDown below - same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
   async function saveEntryVariables(saveExpr) {
     if (!saveExpr || state.status !== 'ready' || state.busy) return;
     state.busy = true;
@@ -1263,15 +1276,15 @@ export function mountApp(root) {
       }
     }
 
-    // "s" with an entry selected saves that entry's solved variable(s) - same idea as "p"
-    // above, but for saveableExprForEntry/saveEntryVariables instead of plottableExprForEntry/
+    // "s" with an entry selected opens the save-as menu for that entry's output - same idea
+    // as "p" above, but for saveableForEntry/saveMenu instead of plottableExprForEntry/
     // addExpressionToPlot (see there, and the entry's own always-visible "save" button in
     // historyEntry.js, which shows under the same check).
     if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
-      const saveExpr = saveableExprForEntry(state.history[step.idx]);
-      if (saveExpr) {
+      const saveInfo = saveableForEntry(state.history[step.idx]);
+      if (saveInfo) {
         e.preventDefault();
-        saveEntryVariables(saveExpr);
+        saveMenu.open(saveInfo);
         return;
       }
     }

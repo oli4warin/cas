@@ -455,7 +455,7 @@ export function normalizeNspireMatrices(expr) {
 // see parseSolveSolutions below, which relies on this to recognize the whole thing as already
 // a condition rather than a plain value). Any of these shapes is something wrapBareEquation
 // below treats as "solve this".
-function hasTopLevelRelation(s) {
+export function hasTopLevelRelation(s) {
   let depth = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];

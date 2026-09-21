@@ -389,9 +389,9 @@
 }
 
 /* Sits directly to the left of .entry__plot, same idea - only in the DOM when the entry's
-   output carries a ready-made variable assignment (see saveExpr in giac.js), and visible all
-   the time (not just on hover) as the discoverable hint that this entry's "s" shortcut
-   exists. */
+   output has something plain enough to save (see saveableForEntry in lib/saveable.js), and
+   visible all the time (not just on hover) as the discoverable hint that this entry's "s"
+   shortcut exists. */
 .entry__save {
   position: absolute;
   top: 4px;

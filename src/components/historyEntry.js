@@ -3,7 +3,7 @@ import { typesetNode } from '../lib/mathjax.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
 import { reinsertableValue } from '../lib/giac.js';
 import { plottableExprForEntry } from '../lib/plottable.js';
-import { saveableExprForEntry } from '../lib/saveable.js';
+import { saveableForEntry } from '../lib/saveable.js';
 import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
@@ -11,14 +11,16 @@ import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 // when plottableExprForEntry actually found something to plot (see there) - same check the
 // "p" keyboard shortcut on a selected output uses (see app.js), so both agree on exactly
 // which outputs offer this. `onSave` is the same idea for the "save" button/"s" shortcut and
-// saveableExprForEntry. `definitions` is read fresh on every call (App's current session
-// state, not frozen at the time this entry was created) purely to decide how a list-index
-// alias in `entry.input` displays (see displayListIndexAliases) - it never affects anything
-// already computed (entry.text/latex/raw are exactly what evaluate() returned). `showText`
-// is read fresh on every render() call too (App owns that as global UI state).
+// saveableForEntry, called with (index, { defaultName, value }) to open the naming menu (see
+// components/saveMenu.js) rather than saving outright. `definitions` is read fresh on every
+// call (App's current session state, not frozen at the time this entry was created) purely to
+// decide how a list-index alias in `entry.input` displays (see displayListIndexAliases) - it
+// never affects anything already computed (entry.text/latex/raw are exactly what evaluate()
+// returned). `showText` is read fresh on every render() call too (App owns that as global UI
+// state).
 export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave, definitions }) {
   const plotExpr = plottableExprForEntry(entry);
-  const saveExpr = saveableExprForEntry(entry);
+  const saveInfo = saveableForEntry(entry);
   let copiedTimeout = null;
 
   const inputMath = h('span', { class: 'entry__math' });
@@ -104,23 +106,24 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   );
   if (!plotExpr) plotBtn.style.display = 'none';
 
-  // Only rendered at all when this output actually carries a ready-made assignment (see
-  // saveExpr above) - stopPropagation for the same reason as plotBtn's.
+  // Only rendered at all when this output actually has something plain enough to save (see
+  // saveInfo above) - stopPropagation for the same reason as plotBtn's. Opens the naming menu
+  // (see saveMenu.js) rather than saving outright, same as the "s" shortcut (see app.js).
   const saveBtn = h(
     'button',
     {
       type: 'button',
       class: 'entry__save',
-      'aria-label': 'Save the solved variable(s)',
-      title: 'Save the solved variable(s) (s)',
+      'aria-label': 'Save this result under a name',
+      title: 'Save this result under a name (s)',
       onclick: (e) => {
         e.stopPropagation();
-        onSave(index, saveExpr);
+        onSave(index, saveInfo);
       },
     },
     'save',
   );
-  if (!saveExpr) saveBtn.style.display = 'none';
+  if (!saveInfo) saveBtn.style.display = 'none';
 
   const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, plotBtn, saveBtn, inputRow, outputRow);
 
