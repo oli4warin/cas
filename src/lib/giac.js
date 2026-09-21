@@ -1170,7 +1170,28 @@ function parseSolveSolutions(raw, varNames) {
     reinsertRaw = `list[${tuples.map((values) => values[0]).join(',')}]`;
   }
 
-  return { clauses, reinsertRaw };
+  return { clauses, reinsertRaw, tuples };
+}
+
+// Builds a Giac assignment statement that pins every one of `varNames` to its own solved
+// value(s), for the entry's own "save" button/"s" shortcut (see lib/saveable.js) - "x=1" saves
+// as "x:=1"; several solutions for one variable ("x_1=sqrt(2)", "x_2=2" - see
+// parseSolveSolutions's subscripting) collect into one list, "x:=list[sqrt(2),2]"; several
+// variables (a system) save simultaneously via Xcas's own comma-separated assignment form,
+// "a,b:=1,2" (see parseMultiDefinition in definitions.js, which already understands this
+// shape). `tuples` is one array per solution, each `varNames.length` values long - exactly
+// what parseSolveSolutions/formatSolveResultApprox already build for `clauses`, so both share
+// this rather than re-parsing rendered text. Returns null when there's nothing sensible to
+// assign: no solutions, or any value that's itself a relation rather than a plain value (an
+// inequality solution, e.g. "x>6" - there's no single value there to pin the name to).
+function buildSaveAssignment(tuples, varNames) {
+  if (!tuples || tuples.length === 0 || !varNames || varNames.length === 0) return null;
+  if (tuples.some((values) => values.some((v) => hasTopLevelRelation(v)))) return null;
+  const rhs = varNames.map((_, i) => {
+    const values = tuples.map((t) => t[i]);
+    return values.length > 1 ? `list[${values.join(',')}]` : values[0];
+  });
+  return varNames.length > 1 ? `${varNames.join(',')}:=${rhs.join(',')}` : `${varNames[0]}:=${rhs[0]}`;
 }
 
 // Stacks each already-labeled solution clause (see parseSolveSolutions) on its own row via
@@ -1187,14 +1208,17 @@ function renderGatheredLatex(clauses) {
 // was given (see parseSolveVarList) - shared by evaluate() and both spots in evaluateApprox()
 // that need it. Returns null (meaning: fall back to Giac's own rendering) whenever `varNames`
 // is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions).
+// `saveExpr` (see buildSaveAssignment) is the entry's own "save" button's assignment
+// statement, or null when this result isn't a plain enough value to save.
 function formatSolveResult(raw, varNames) {
   const parsed = varNames && parseSolveSolutions(raw, varNames);
   if (!parsed) return null;
-  const { clauses, reinsertRaw } = parsed;
+  const { clauses, reinsertRaw, tuples } = parsed;
   return {
     text: clauses.join('\n'),
     latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
     raw: reinsertRaw !== undefined ? reinsertRaw : raw,
+    saveExpr: buildSaveAssignment(tuples, varNames),
   };
 }
 
@@ -1748,7 +1772,7 @@ export async function evaluate(expr, definitions) {
   // Giac's outer solution-list (see parseSolveSolutions's `reinsertRaw`).
   const solved = formatSolveResult(out, parseSolveVarList(sentExpr));
   if (solved) {
-    return { raw: solved.raw, isError: false, text: solved.text, latex: solved.latex, isGraphics: false };
+    return { raw: solved.raw, isError: false, text: solved.text, latex: solved.latex, isGraphics: false, saveExpr: solved.saveExpr };
   }
 
   // desolve()'s own bare solution expression doesn't say which function it's the solution
@@ -1907,6 +1931,7 @@ function formatSolveResultApprox(exactRaw, approxRaw, varNames) {
     text: textClauses.join('\n'),
     latex: latexClauses.length === 1 ? latexClauses[0] : latexClauses.every(Boolean) ? `\\begin{gathered}${latexClauses.join('\\\\')}\\end{gathered}` : null,
     raw: reinsertRaw !== undefined ? reinsertRaw : approxRaw,
+    saveExpr: buildSaveAssignment(reinsertTuples, varNames),
   };
 }
 
@@ -2009,7 +2034,7 @@ export async function evaluateApprox(expr, definitions) {
     // evalf() failed for some reason - show the exact form rather than an error.
     const solvedExact = formatSolveResult(out, varNames);
     if (solvedExact) {
-      return { raw: solvedExact.raw, isError: false, text: solvedExact.text, latex: solvedExact.latex, isGraphics: false };
+      return { raw: solvedExact.raw, isError: false, text: solvedExact.text, latex: solvedExact.latex, isGraphics: false, saveExpr: solvedExact.saveExpr };
     }
     const desolvedExact = formatDesolveResult(out, desolveFuncName);
     if (desolvedExact) {
@@ -2026,7 +2051,7 @@ export async function evaluateApprox(expr, definitions) {
 
   const solvedApprox = formatSolveResultApprox(out, approxOut, varNames) || formatSolveResult(approxOut, varNames);
   if (solvedApprox) {
-    return { raw: solvedApprox.raw, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false };
+    return { raw: solvedApprox.raw, isError: false, text: solvedApprox.text, latex: solvedApprox.latex, isGraphics: false, saveExpr: solvedApprox.saveExpr };
   }
 
   const desolvedApprox = formatDesolveResult(approxOut, desolveFuncName);

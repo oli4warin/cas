@@ -16,6 +16,7 @@ import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
 import { applyEntryToDefinitions } from './lib/definitions.js';
 import { plottableExprForEntry } from './lib/plottable.js';
+import { saveableExprForEntry } from './lib/saveable.js';
 import { startBridgeHost } from './lib/plotBridge.js';
 import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
 import { makeInitialColumns } from './lib/tableColumns.js';
@@ -603,7 +604,14 @@ export function mountApp(root) {
   function pushHistoryEntry(entry) {
     state.history.push(entry);
     const idx = state.history.length - 1;
-    const view = HistoryEntry({ entry, index: idx, onSelect: selectHistory, onDelete: deleteEntry, onPlot: (i, expr) => addExpressionToPlot(expr) });
+    const view = HistoryEntry({
+      entry,
+      index: idx,
+      onSelect: selectHistory,
+      onDelete: deleteEntry,
+      onPlot: (i, expr) => addExpressionToPlot(expr),
+      onSave: (i, expr) => saveEntryVariables(expr),
+    });
     view.setShowText(state.showText);
     const wrapper = h('div', { id: `entry-${idx}` }, view.root);
     historyList.appendChild(wrapper);
@@ -627,7 +635,14 @@ export function mountApp(root) {
     }
     entryViews.length = idx;
     for (let i = idx; i < state.history.length; i++) {
-      const view = HistoryEntry({ entry: state.history[i], index: i, onSelect: selectHistory, onDelete: deleteEntry, onPlot: (idx, expr) => addExpressionToPlot(expr) });
+      const view = HistoryEntry({
+        entry: state.history[i],
+        index: i,
+        onSelect: selectHistory,
+        onDelete: deleteEntry,
+        onPlot: (idx, expr) => addExpressionToPlot(expr),
+        onSave: (idx, expr) => saveEntryVariables(expr),
+      });
       view.setShowText(state.showText);
       const wrapper = h('div', { id: `entry-${i}` }, view.root);
       historyList.appendChild(wrapper);
@@ -1016,6 +1031,26 @@ export function mountApp(root) {
     updateSelection();
   }
 
+  // Runs a solved entry's own ready-made assignment statement (see saveExpr/saveableExprForEntry)
+  // exactly like submit() would if the user had typed and pressed Enter on it - pushes its own
+  // new history entry and folds the resulting definitions in - but without touching the CAS
+  // input box at all (unlike submit(), which always reads/clears `input.value`), since the
+  // user didn't type this: the entry's own "save" button (or the "s" shortcut) did. Wired to
+  // both (see pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
+  // handleKeyDown below), same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
+  async function saveEntryVariables(saveExpr) {
+    if (!saveExpr || state.status !== 'ready' || state.busy) return;
+    state.busy = true;
+    renderStatus();
+    const result = await giacEvaluate(saveExpr, state.definitions);
+    state.busy = false;
+    renderStatus();
+    pushHistoryEntry({ input: saveExpr, ...result });
+    setDefinitions(applyEntryToDefinitions(state.definitions, saveExpr, result));
+    state.navPos = -1;
+    updateSelection();
+  }
+
   function setDefinitions(next) {
     if (next === state.definitions) return;
     state.definitions = next;
@@ -1142,6 +1177,19 @@ export function mountApp(root) {
       if (plotExpr) {
         e.preventDefault();
         addExpressionToPlot(plotExpr);
+        return;
+      }
+    }
+
+    // "s" with an entry selected saves that entry's solved variable(s) - same idea as "p"
+    // above, but for saveableExprForEntry/saveEntryVariables instead of plottableExprForEntry/
+    // addExpressionToPlot (see there, and the entry's own always-visible "save" button in
+    // historyEntry.js, which shows under the same check).
+    if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
+      const saveExpr = saveableExprForEntry(state.history[step.idx]);
+      if (saveExpr) {
+        e.preventDefault();
+        saveEntryVariables(saveExpr);
         return;
       }
     }

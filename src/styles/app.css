@@ -388,6 +388,37 @@
   background: var(--accent-bg);
 }
 
+/* Sits directly to the left of .entry__plot, same idea - only in the DOM when the entry's
+   output carries a ready-made variable assignment (see saveExpr in giac.js), and visible all
+   the time (not just on hover) as the discoverable hint that this entry's "s" shortcut
+   exists. */
+.entry__save {
+  position: absolute;
+  top: 4px;
+  right: 76px;
+  z-index: 1;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.entry__save:hover,
+.entry__save:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .entry--error .entry__output {
   color: var(--error);
 }
@@ -946,7 +977,8 @@
 
   .entry__copied,
   .entry__delete,
-  .entry__plot {
+  .entry__plot,
+  .entry__save {
     display: none;
   }
 }
