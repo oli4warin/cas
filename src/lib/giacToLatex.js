@@ -8,7 +8,7 @@
 // path needs a fully-parseable expression and a worker round trip, both wrong fits for a
 // per-keystroke preview.
 
-import { XCAS_COMMANDS, XCAS_COMMAND_ALIASES } from './xcasCommands.js';
+import { XCAS_COMMANDS, XCAS_COMMAND_ALIASES, expandInverseTrigAliases } from './xcasCommands.js';
 
 const UNARY_PREC = 7; // same as '^', so "-x^2" parses as -(x^2), matching math convention.
 
@@ -476,7 +476,11 @@ function renderCall(node) {
 export function giacToLatex(src) {
   if (!src || !src.trim()) return '';
   try {
-    const tokens = tokenize(src);
+    // "sin-1(x)"/"sin^-1(x)"/"sin^(-1)(x)" -> "asin(x)" etc, same rewrite giac.js applies
+    // before evaluation (see normalizeInverseTrigAliases there) - done here too, ahead of
+    // tokenizing, so the preview renders the \arcsin glyph (see TRIG below) for these calculator-
+    // familiar spellings instead of the tokenizer splitting them into "sin", "-", "1", ...
+    const tokens = tokenize(expandInverseTrigAliases(src));
     const parser = makeParser(tokens);
     // Top level allows comma-separated sequences too, e.g. "a,b:=[1,2]" or "1,2,3" -
     // parseExpression() alone stops at the first comma since ',' isn't an infix operator.

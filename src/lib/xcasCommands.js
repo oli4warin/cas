@@ -194,3 +194,27 @@ export const XCAS_COMMAND_ALIASES = {
   normal_cdf: 'normald_cdf',
   binomcdf: 'binomial_cdf',
 };
+
+// Calculator-familiar inverse-notation spellings ("sin-1(x)", "sin^-1(x)", "sin^(-1)(x)") for
+// each of the six trig/hyperbolic functions above that already have a canonical arc-/inverse-
+// form in XCAS_COMMANDS - all meaning the same thing as calling that canonical name directly.
+// Kept as a separate map (rather than folded into XCAS_COMMAND_ALIASES) since the "-1" suffix
+// isn't part of a bare identifier, so it needs its own regex rather than the plain \b(name)
+// lookup normalizeAliasCommands/operatorLabel use for that table.
+export const INVERSE_TRIG_ALIASES = {
+  sin: 'asin', cos: 'acos', tan: 'atan',
+  sinh: 'asinh', cosh: 'acosh', tanh: 'atanh',
+};
+
+const INVERSE_TRIG_NAMES_PATTERN = Object.keys(INVERSE_TRIG_ALIASES).join('|');
+// The "-1" itself is intentionally never optional/generalized to other exponents - this only
+// ever means "the inverse function", matching how every calculator/textbook uses sin^-1.
+const INVERSE_TRIG_ALIAS_RE = new RegExp(`\\b(${INVERSE_TRIG_NAMES_PATTERN})(?:-1|\\^-1|\\^\\(-1\\))(?=\\s*\\()`, 'gi');
+
+// Rewrites any of the spellings above to its canonical asin/acos/.../atanh name, case-
+// insensitively, before an expression reaches the engine (see normalizeInverseTrigAliases in
+// giac.js) or the live preview's own tokenizer (see giacToLatex.js) - both run this on the raw
+// text first so neither has to special-case the "-1"/"^-1"/"^(-1)" suffix itself.
+export function expandInverseTrigAliases(expr) {
+  return expr.replace(INVERSE_TRIG_ALIAS_RE, (_m, base) => INVERSE_TRIG_ALIASES[base.toLowerCase()]);
+}

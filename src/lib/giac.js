@@ -4,7 +4,7 @@
 // timeout here just terminates and respawns the worker to recover).
 
 import { giacToLatex } from './giacToLatex.js';
-import { XCAS_COMMAND_ALIASES } from './xcasCommands.js';
+import { XCAS_COMMAND_ALIASES, expandInverseTrigAliases } from './xcasCommands.js';
 import { fitSinusoid } from './sinRegression.js';
 import { fitPolynomial, fitPower, fitExponential, fitLogarithmic, fitLogistic } from './regression.js';
 import { expandListIndexAliases } from './listIndexAlias.js';
@@ -226,6 +226,18 @@ const COMMAND_ALIAS_RE = new RegExp(`\\b(${ALIAS_NAMES_PATTERN})(?=\\s*\\()`, 'g
 
 export function normalizeAliasCommands(expr) {
   return expr.replace(COMMAND_ALIAS_RE, (m) => XCAS_COMMAND_ALIASES[m.toLowerCase()]);
+}
+
+// Calculator-style inverse-trig notation - "sin-1(x)", "sin^-1(x)", "sin^(-1)(x)" all meaning
+// asin(x), same idea for cos/tan/sinh/cosh/tanh (see expandInverseTrigAliases/
+// INVERSE_TRIG_ALIASES in xcasCommands.js for the actual table and regex, shared with
+// giacToLatex.js's live preview so both agree on what counts as one of these aliases). Run
+// ahead of normalizePowerCalls below, whose own "^n(...)" rewrite deliberately leaves a "-1"
+// exponent alone (see its comment) since that's genuine functional-inverse composition in
+// Giac for an arbitrary function - by the time it runs, these six have already been rewritten
+// to their plain asin/acos/... form and have no "^" left for it to see.
+export function normalizeInverseTrigAliases(expr) {
+  return expandInverseTrigAliases(expr);
 }
 
 // A friendlier, calculator-style alias for `purge`: Giac has no bare "del <name>" command of
@@ -1877,7 +1889,7 @@ export async function evaluate(expr, definitions) {
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
   const sentExpr = normalizePowerCalls(
-    normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions)))),
+    normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
   );
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
@@ -2159,7 +2171,7 @@ export async function evaluateApprox(expr, definitions) {
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
   const normalized = normalizePowerCalls(
-    normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions)))),
+    normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
   );
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
