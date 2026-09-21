@@ -645,7 +645,7 @@ export function mountApp(root) {
       onSelect: selectHistory,
       onDelete: deleteEntry,
       onPlot: (i, expr) => addExpressionToPlot(expr),
-      onSave: (i, info) => saveMenu.open(info),
+      onSave: (i, info) => handleSaveEntry(info),
       definitions: state.definitions,
     });
     view.setShowText(state.showText);
@@ -677,7 +677,7 @@ export function mountApp(root) {
         onSelect: selectHistory,
         onDelete: deleteEntry,
         onPlot: (idx, expr) => addExpressionToPlot(expr),
-        onSave: (idx, info) => saveMenu.open(info),
+        onSave: (idx, info) => handleSaveEntry(info),
         definitions: state.definitions,
       });
       view.setShowText(state.showText);
@@ -1124,15 +1124,13 @@ export function mountApp(root) {
     updateSelection();
   }
 
-  // Runs the "name:=value" (or "f(x):=value") assignment the save menu just built (see
-  // saveMenu.js/saveableForEntry) exactly like submit() would if the user had typed and
-  // pressed Enter on it - pushes its own new history entry and folds the resulting
-  // definitions in - but without touching the CAS input box at all (unlike submit(), which
-  // always reads/clears `input.value`), since the user didn't type this into it: they typed
-  // a name into the save menu instead. Wired as that menu's onSubmit (see its construction
-  // above), which is opened by the entry's own "save" button (or the "s" shortcut) - see
-  // pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
-  // handleKeyDown below - same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
+  // Runs a "name:=value" (or "f(x):=value") assignment statement exactly like submit() would
+  // if the user had typed and pressed Enter on it - pushes its own new history entry and
+  // folds the resulting definitions in - but without touching the CAS input box at all
+  // (unlike submit(), which always reads/clears `input.value`), since the user didn't type
+  // this into it. Called either with an entry's own ready-made saveExpr (the "quick save"
+  // path - see handleSaveEntry) or with what the save menu just built from a typed name (see
+  // saveMenu.js's onSubmit above).
   async function saveEntryVariables(saveExpr) {
     if (!saveExpr || state.status !== 'ready' || state.busy) return;
     state.busy = true;
@@ -1144,6 +1142,19 @@ export function mountApp(root) {
     setDefinitions(applyEntryToDefinitions(state.definitions, saveExpr, result));
     state.navPos = -1;
     updateSelection();
+  }
+
+  // Entry point for the entry's own "save" button (or the "s" shortcut) - see
+  // pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
+  // handleKeyDown below, same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
+  // `info` is whatever saveableForEntry (lib/saveable.js) found: a solve()-style result
+  // already carries an unambiguous name to save under, so that runs immediately, same as
+  // before the naming menu existed; anything else has no name of its own, so this opens the
+  // menu instead and lets saveMenu's onSubmit (above) call saveEntryVariables once one's typed.
+  function handleSaveEntry(info) {
+    if (!info) return;
+    if (info.quickExpr) saveEntryVariables(info.quickExpr);
+    else saveMenu.open(info);
   }
 
   function setDefinitions(next) {
@@ -1276,15 +1287,15 @@ export function mountApp(root) {
       }
     }
 
-    // "s" with an entry selected opens the save-as menu for that entry's output - same idea
-    // as "p" above, but for saveableForEntry/saveMenu instead of plottableExprForEntry/
-    // addExpressionToPlot (see there, and the entry's own always-visible "save" button in
-    // historyEntry.js, which shows under the same check).
+    // "s" with an entry selected saves that entry's output - same idea as "p" above, but for
+    // saveableForEntry/handleSaveEntry instead of plottableExprForEntry/addExpressionToPlot
+    // (see there, and the entry's own always-visible "save" button in historyEntry.js, which
+    // shows under the same check).
     if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
       const saveInfo = saveableForEntry(state.history[step.idx]);
       if (saveInfo) {
         e.preventDefault();
-        saveMenu.open(saveInfo);
+        handleSaveEntry(saveInfo);
         return;
       }
     }

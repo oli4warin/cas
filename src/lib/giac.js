@@ -1030,11 +1030,14 @@ const SYSTEM_CAPABLE_COMMANDS = new Set(['solve', 'csolve']);
 
 // Recognizes a solve-like call in any of the shapes above and returns the variable name(s) in
 // argument order, or null if `sentExpr` (the exact string just sent to the engine) isn't
-// shaped like one (any other command, or a call to one of these typed with no variable at all,
-// or a plain default-guess numeral in fsolve's place, etc). Used to relabel the solution(s)
-// handed back (see parseSolveSolutions below) with the variable each slot belongs to, since a
-// bare tuple/list on its own doesn't say which value is which variable.
-function parseSolveVarList(sentExpr) {
+// shaped like one (any other command, or a plain default-guess numeral in fsolve's place,
+// etc). Used to relabel the solution(s) handed back (see parseSolveSolutions below) with the
+// variable each slot belongs to, since a bare tuple/list on its own doesn't say which value is
+// which variable. Also handles a call typed with no variable at all - e.g. "solve(x^2=2)" -
+// the same way Giac itself does: inferred from whichever single free variable the equation
+// actually mentions (see collectFreeVariables); left unlabeled (null) when that's ambiguous
+// (zero or several free variables), same as it always was for a bare non-solve expression.
+function parseSolveVarList(sentExpr, definitions = new Map()) {
   const s = sentExpr.trim();
   const body = s.endsWith(';') ? s.slice(0, -1) : s;
   const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
@@ -1044,6 +1047,10 @@ function parseSolveVarList(sentExpr) {
   const openIdx = nameMatch[0].length - 1;
   if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
   const args = splitTopLevel(body.slice(openIdx + 1, -1), ',');
+  if (args.length === 1) {
+    const freeVars = collectFreeVariables(args[0], definitions);
+    return freeVars.length === 1 ? freeVars : null;
+  }
   if (args.length < 2) return null;
   const last = args[args.length - 1].trim();
 
@@ -1974,7 +1981,7 @@ export async function evaluate(expr, definitions) {
   // copying the result (see historyEntry.js) still copies exactly what Giac returned; with
   // exactly one solution `raw` is replaced by that solution's own value(s), unwrapped out of
   // Giac's outer solution-list (see parseSolveSolutions's `reinsertRaw`).
-  const solved = formatSolveResult(out, parseSolveVarList(sentExpr));
+  const solved = formatSolveResult(out, parseSolveVarList(sentExpr, definitions));
   if (solved) {
     return { raw: solved.raw, isError: false, text: solved.text, latex: solved.latex, isGraphics: false, saveExpr: solved.saveExpr };
   }
@@ -2230,7 +2237,7 @@ export async function evaluateApprox(expr, definitions) {
 
   // solve()'s own tuple form doesn't say which value is which variable - see the matching
   // comment in evaluate() above (same single-solution `raw` unwrapping applies below).
-  const varNames = parseSolveVarList(normalized);
+  const varNames = parseSolveVarList(normalized, definitions);
   // desolve()'s own bare solution expression doesn't say which function it's the solution
   // for - see the matching comment in evaluate() above (same "<func>=<solution>" labeling,
   // bare `raw`, applies below).
