@@ -172,5 +172,15 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     }, 1000);
   }
 
-  return { root, setSelected, setShowText };
+  // Copies this entry's input or output text to the clipboard - the same thing clicking the
+  // In[]/Out[] row itself does (see copyToClipboard above), exposed so the "c"/Ctrl+C
+  // keyboard shortcut on a selected entry (see app.js) can trigger it without needing to
+  // reach for the mouse. `part` is whichever half is currently selected (see setSelected) -
+  // an error entry has no copyable output, matching outputRow's own onclick guard above.
+  function copy(part) {
+    if (part === 'output' && entry.isError) return;
+    copyToClipboard(part, part === 'input' ? entry.input : reinsertableValue(entry.raw));
+  }
+
+  return { root, setSelected, setShowText, copy };
 }

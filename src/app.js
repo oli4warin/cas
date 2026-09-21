@@ -1220,6 +1220,19 @@ export function mountApp(root) {
       }
     }
 
+    // "c" or Ctrl/Cmd+C with an entry selected copies whichever half is currently
+    // highlighted (its input or output - see currentStep/setSelected) to the clipboard,
+    // same as clicking that In[]/Out[] row would (see historyEntry.js's copy()). Unlike
+    // "p"/"s" above, Ctrl/Cmd+C is intercepted too, not just the bare key - it's normally
+    // the browser's own copy shortcut, but there's nothing selected in the (empty, while
+    // browsing) expression input for it to act on anyway, so taking it over here doesn't
+    // give anything up.
+    if (e.key.toLowerCase() === 'c' && !e.altKey && step) {
+      e.preventDefault();
+      entryViews[step.idx].copy(step.part);
+      return;
+    }
+
     if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && step) {
       const wrapper = document.getElementById(`entry-${step.idx}`);
       const row = wrapper?.querySelector(step.part === 'input' ? '.entry__input' : '.entry__output');
