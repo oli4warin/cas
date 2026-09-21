@@ -43,7 +43,7 @@ const GREEK = {
   // Braced into one group (matching fixPauSymbol's own wrapping in lib/giac.js) so a power
   // typed right after it (e.g. "pau^2", from piToTau's pauMode-power conversion) attaches to
   // the whole symbol via renderPowerBase below, not just to its trailing "\tau" token.
-  pau: '{\\pi\\hspace{-0.25em}\\tau}',
+  pau: '\\pi\\hspace{-0.2em}\\tau\\hspace{-0.77em}/\\hspace{-0.5em}\\backslash',
 };
 
 // The literal "paumode"/"pimode"/"taumode" easter-egg commands (see app.js's submit()) aren't
