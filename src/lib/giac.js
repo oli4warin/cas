@@ -475,20 +475,110 @@ function findTopLevelPipeIndex(s) {
   return -1;
 }
 
-// True iff `pipeRhs` (the text after a top-level "|") is shaped like Giac's own "evaluate
-// at"/substitution list - one or more comma-separated `name=value` assignments, e.g. "x=7" or
-// "x=1,y=2" (as in "2*x+1|x=7", which Giac substitutes x=7 into and returns 15 directly, no
-// subst() call needed). Each part must have a bare "=" (not "==", "!=", "<=", ">=") right after
-// the name for this to count as an assignment rather than a condition. A rhs joined with
-// "and"/"or" (e.g. "a=1 and b=2", restricting several parameters at once - see
-// wrapBareEquation below) is never this substitution shape even though a single "and"-free
-// fragment of it might match the per-part regex on its own: Giac's own "|" substitution list
-// only understands commas, not "and"/"or", so that has to fall through to the condition path
-// instead (which does understand "and"/"or", via splitTopLevelKeyword there).
-function isSubstitutionPipeRhs(pipeRhs) {
-  if (splitTopLevelKeyword(pipeRhs, 'and').length > 1 || splitTopLevelKeyword(pipeRhs, 'or').length > 1) return false;
-  const parts = splitTopLevel(pipeRhs, ',');
-  return parts.length > 0 && parts.every((p) => /^\s*[A-Za-z_][A-Za-z0-9_]*\s*=(?!=)[^<>]*$/.test(p));
+// Splits `s` into fragments on any top-level ",", "and", or "or" - the three ways Giac/Xcas
+// syntax lets several `name=value` pins be listed together after a restriction "|" (e.g.
+// "x=1,y=2" or "a=1 and b=2" - see parsePipeAssignments below). Mirrors splitTopLevelKeyword's
+// word-boundary handling for "and"/"or", with the comma case folded in too, since a caller
+// needs all three treated as equivalent list separators to test the whole rhs as one list.
+function splitPipeFragments(s) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') {
+      depth++;
+    } else if (c === ')' || c === ']' || c === '}') {
+      depth--;
+    } else if (depth === 0 && c === ',') {
+      parts.push(s.slice(start, i));
+      i++;
+      start = i;
+      continue;
+    } else if (depth === 0 && (s.startsWith('and', i) || s.startsWith('or', i))) {
+      const word = s.startsWith('and', i) ? 'and' : 'or';
+      const before = i === 0 ? '' : s[i - 1];
+      const after = s[i + word.length] ?? '';
+      if (!/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after)) {
+        parts.push(s.slice(start, i));
+        i += word.length;
+        start = i;
+        continue;
+      }
+    }
+    i++;
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
+// Parses `pipeRhs` (the text after a top-level "|") as a list of `name=value` pins - e.g. "x=7"
+// or "x=1,y=2" or "a=1 and b=2" - and returns each as {name, value}, or null if any fragment
+// isn't shaped that way (a bare identifier, a bare "=" not "=="/"!="/"<="/">=", and a value with
+// no "<"/">" of its own - i.e. not itself a condition that still needs solving). Used by
+// resolvePipeRestriction below to substitute pinned parameters directly into an equation rather
+// than folding them in as extra equations for solve() to work out (see its own comment for why).
+function parsePipeAssignments(pipeRhs) {
+  const fragments = splitPipeFragments(pipeRhs);
+  const assignments = [];
+  for (const fragment of fragments) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)(.+)$/.exec(fragment);
+    if (!m || /[<>]/.test(m[2])) return null;
+    assignments.push({ name: m[1], value: m[2].trim() });
+  }
+  return assignments.length > 0 ? assignments : null;
+}
+
+// Resolves a single top-level "|" restriction in `text` - the whole bare input, or just the
+// first argument of a hand-typed solve()/csolve()/fsolve()/zeros()/czeros() call (see
+// wrapBareEquation and rewriteExplicitSolveCallPipe below) - or leaves it unchanged if there's
+// no top-level "|" to begin with (`changed: false`).
+//
+// A restriction whose right-hand side is a plain list of parameter pins (see
+// parsePipeAssignments) is substituted directly into the equation text - "a*x+b=1|a=1 and b=2"
+// becomes "(1)*x+(2)=1" - rather than folded in as extra equations for solve() to work out.
+// Folding would ask solve() to hand back a=1 and b=2 right alongside the answer actually asked
+// for (x), which is exactly the redundant echo pinning a value is meant to avoid - and for a
+// command given only "x" as its own variable (`solve(a*x=1,x)`, `zeros(...)`), extra equations
+// naming other unknowns don't reliably work anyway, since Giac isn't told those are meant to be
+// solved for too. Substituting first means a pinned name never needs declaring as an unknown
+// anywhere downstream. This also covers what Giac's own "|" substitution operator already does
+// natively for a comma-separated pin list ("2*x+1|x=7" evaluates directly to 15, no equation
+// involved) - redone here in JS rather than left to Giac itself, since Giac's own operator
+// silently drops anything joined with "and"/"or" instead of commas ("a*x+b=1|a=1 and b=2" left
+// alone evaluates back to the untouched "a*x+b=1"), and even where it does work, handing an
+// equation like "a*x=1|a=1" to it directly evaluates to the bare equation "x=1" - a shape this
+// app's own EXACT_DECIMAL_TAIL_RE (see evaluate() below) mistakes for an exact-value/decimal-
+// preview pair and renders as "x≈1" instead of "x=1". Substituting here and always continuing
+// into the ordinary equation-detection path below means a pin like this ends up going through
+// solve() (`solve((1)*x=1,x)`) like any other equation, sidestepping both problems at once.
+//
+// Anything else after "|" (an inequality, or an equality that doesn't look like a plain pin,
+// e.g. "a=b") is a genuine filter condition instead, and is folded in as one more "and"-joined
+// equation for solve() to satisfy alongside the rest - see wrapBareEquation's own comment for
+// why that (rather than passing the restriction through unmodified) is what actually works.
+// `addedVars` reports any free variables that condition mentions but the equation part doesn't
+// already contain, in first-appearance order - wrapBareEquation doesn't need this (it always
+// rebuilds its variable list from scratch off the combined text), but
+// rewriteExplicitSolveCallPipe does, to extend a hand-typed call's own variable argument.
+// `kind` distinguishes the two branches above for rewriteExplicitSolveCallPipe below, which
+// needs to treat them differently for fsolve specifically (see its own comment): 'pin' for a
+// parameter substitution, 'condition' for a folded-in filter equation, 'none' when there was no
+// top-level "|" at all.
+function resolvePipeRestriction(text) {
+  const pipeIdx = findTopLevelPipeIndex(text);
+  if (pipeIdx === -1) return { text, changed: false, addedVars: [], kind: 'none' };
+  const eqPart = text.slice(0, pipeIdx);
+  const pipeRhs = text.slice(pipeIdx + 1);
+  const assignments = parsePipeAssignments(pipeRhs);
+  if (assignments) {
+    const substituted = substituteParams(eqPart, assignments.map((a) => a.name), assignments.map((a) => a.value));
+    return { text: substituted, changed: true, addedVars: [], kind: 'pin' };
+  }
+  const existingVars = new Set(collectFreeVariables(eqPart, new Map()));
+  const addedVars = collectFreeVariables(pipeRhs, new Map()).filter((v) => !existingVars.has(v));
+  return { text: `${eqPart} and ${pipeRhs}`, changed: true, addedVars, kind: 'condition' };
 }
 
 
@@ -655,6 +745,79 @@ function pickIndependentVar(funcNames) {
   return INDEPENDENT_VAR_CANDIDATES.find((v) => !funcNames.includes(v)) || 'x';
 }
 
+const CALL_HEAD_RE = /^([A-Za-z_][A-Za-z0-9_]*)\(/;
+
+// Rewrites a "|" restriction attached to a hand-typed solve()/csolve()/fsolve()/zeros()/
+// czeros() call - either sitting inside the call's own first argument (`solve(x^2=2|x>0,x)`)
+// or tacked on after the whole call (`solve(x^2=2,x)|x>0`, which a user reaching for a
+// restriction on an already-complete call would just as naturally write) - into
+// `solve(x^2=2 and x>0,x)`, the same way wrapBareEquation does for a bare equation (see
+// resolvePipeRestriction above). Both spellings mean the same restriction on the same
+// equation/variable, so both are folded into the call's first argument exactly the same way;
+// none of these commands actually filter on a "|" restriction left where the user put it
+// (`solve(x^2=2|x>0,x)` comes back empty - the "|" errors internally and solve() just swallows
+// that into no solutions - and `solve(x^2=2,x)|x>0` would otherwise fall through to
+// wrapBareEquation's own bare-equation handling below, which has no idea "solve(x^2=2,x)" is
+// itself a value to restrict and would wrongly try to solve `solve(x^2=2,x) and x>0` as one
+// more equation in x). Returns the rewritten call text, or null if `body` isn't shaped like
+// either of these - wrapBareEquation's caller falls through to its usual bare-equation handling
+// in that case (which leaves an already-wrapped call with no restriction at all untouched,
+// since its own "=" sits at depth > 0).
+//
+// A restriction that introduces variables the call's own variable argument doesn't already name
+// (resolvePipeRestriction's `addedVars` - only possible for a genuine filter condition, since a
+// parameter pin is substituted away entirely, never added as an unknown) is appended to that
+// argument, bracketed as a list if it wasn't already. Only for solve/csolve, though (see
+// SYSTEM_CAPABLE_COMMANDS below): fsolve/zeros/czeros error on a bracketed variable list, so a
+// condition naming a variable outside their single declared one is left for Giac to reject on
+// its own, same as if the user had typed the same variable list without any restriction at all.
+//
+// fsolve is excluded from the *condition* branch specifically (a parameter pin still applies
+// fine - substituting it away leaves a perfectly ordinary equation for fsolve's own numeric
+// search): fsolve's bisection search doesn't tolerate a folded-in "and" condition the way the
+// other four commands' exact/symbolic solvers do - `fsolve(cos(x)=x and x>0,x)` comes back
+// empty even though cos(x)=x does have a solution there, rather than filtering correctly the
+// way `zeros(x^3-x and x>0,x)` does. Rather than fold it in anyway (wrong) or fall through to
+// the caller's own bare-equation handling (which would, for the "outside the call" spelling,
+// wrongly try to treat the already-complete fsolve(...) call as one more equation to solve -
+// see the caller), this returns the sentinel `false`: leave `body` completely untouched.
+// fsolve's own handling of a literal "|" left in its argument has at least been observed to
+// ignore it and still return the unrestricted root, a less actively-wrong fallback than a
+// confidently empty or nonsensical result.
+function rewriteExplicitSolveCallPipe(body) {
+  const head = CALL_HEAD_RE.exec(body);
+  if (!head || !SOLVE_LIKE_COMMANDS.has(head[1])) return null;
+  const openIdx = head[0].length - 1;
+  const close = findMatchingParen(body, openIdx);
+  if (close === -1) return null;
+  const funcName = head[1];
+  const args = splitTopLevel(body.slice(openIdx + 1, close), ',');
+  if (args.length === 0) return null;
+
+  let restriction;
+  if (close === body.length - 1) {
+    if (findTopLevelPipeIndex(args[0]) === -1) return null;
+    restriction = resolvePipeRestriction(args[0]);
+  } else {
+    const rest = body.slice(close + 1).trim();
+    if (!rest.startsWith('|')) return null;
+    restriction = resolvePipeRestriction(`${args[0]}|${rest.slice(1).trim()}`);
+  }
+  if (funcName === 'fsolve' && restriction.kind === 'condition') return false;
+
+  const newArgs = [restriction.text, ...args.slice(1)];
+  if (restriction.addedVars.length > 0 && SYSTEM_CAPABLE_COMMANDS.has(funcName) && args.length >= 2) {
+    const existingArg = args[1].trim();
+    const existingVars =
+      existingArg.startsWith('[') && existingArg.endsWith(']')
+        ? splitTopLevel(existingArg.slice(1, -1), ',').map((v) => v.trim())
+        : [existingArg];
+    const merged = [...existingVars, ...restriction.addedVars.filter((v) => !existingVars.includes(v))];
+    newArgs[1] = merged.length > 1 ? `[${merged.join(',')}]` : merged[0];
+  }
+  return `${funcName}(${newArgs.join(',')})`;
+}
+
 // A line that's just one or more equations and no command at all - "x^2-3=0", or a system
 // as "x+y=5 and y-x=3" or "[x+y=5,y-x=3]" - almost always means "solve this", so wrap it the
 // way a user reaching for the `solve` button (see EXPRESSION_BUTTONS in app.js) would. The
@@ -691,20 +854,22 @@ export function wrapBareEquation(expr, definitions = new Map()) {
   let body = hasSemi ? s.slice(0, -1) : s;
   if (!body) return expr;
 
-  // A top-level "|" is either Giac's substitution operator ("2*x+1|x=7", bail out and leave it
-  // for Giac to evaluate directly - see isSubstitutionPipeRhs) or a domain restriction
-  // ("x^2=2|x>0", meaning "solve this equation subject to this condition"). Giac's solve()
-  // doesn't actually filter on a "|" restriction passed alongside the equation (tried as
-  // `solve(x^2=2|x>0,x)` - comes back empty); what does work is folding the condition in as
-  // just another equation of the system, `solve(x^2=2 and x>0,x)`, which the "and"-splitting
-  // below already knows how to build a var-labeled solve() call for. So a restriction pipe is
-  // rewritten to " and " here and falls straight into that existing path.
-  const pipeIdx = findTopLevelPipeIndex(body);
-  if (pipeIdx !== -1) {
-    const pipeRhs = body.slice(pipeIdx + 1);
-    if (isSubstitutionPipeRhs(pipeRhs)) return expr;
-    body = `${body.slice(0, pipeIdx)} and ${pipeRhs}`;
-  }
+  // A restriction already wrapped in an explicit solve()/csolve()/fsolve()/zeros()/czeros()
+  // call the user typed by hand - `body`'s own "|" then sits at depth > 0 (inside that call's
+  // parens), invisible to findTopLevelPipeIndex just below, so it's handled separately here
+  // first. See rewriteExplicitSolveCallPipe above.
+  const explicitCallRewrite = rewriteExplicitSolveCallPipe(body);
+  if (explicitCallRewrite === false) return expr;
+  if (explicitCallRewrite != null) return hasSemi ? `${explicitCallRewrite};` : explicitCallRewrite;
+
+  // A top-level "|" is a restriction on the bare equation/system before it - either a plain
+  // parameter pin ("a*x+b=1|a=1 and b=2") substituted directly in, or a genuine filter
+  // condition ("x^2=2|x>0") folded in as one more "and"-joined equation - see
+  // resolvePipeRestriction above for why each is handled the way it is. Either way, this always
+  // continues into the ordinary equation-detection below on the resolved text, rather than
+  // handing anything back to Giac unresolved.
+  const pipeRestriction = resolvePipeRestriction(body);
+  body = pipeRestriction.text;
 
   let equationsText = null;
   let equationParts = null;
@@ -730,7 +895,13 @@ export function wrapBareEquation(expr, definitions = new Map()) {
     equationParts = [body.trim()];
   }
 
-  if (equationsText == null) return expr;
+  // No equation/system left to solve - either there never was a "|" restriction and `body`
+  // is just a plain expression, or there was one and it resolved to a plain expression too
+  // (e.g. "2*x+1|x=7" substitutes to "2*(7)+1", nothing to solve, just evaluate). The latter
+  // still needs the resolved text returned (`body`, with pins substituted in), not the
+  // original `expr` with its "|" still in it - Giac has no notion of that restriction syntax
+  // on its own.
+  if (equationsText == null) return pipeRestriction.changed ? (hasSemi ? `${body};` : body) : expr;
 
   // Multi-function systems disabled for now - desolve() doesn't handle the
   // [eq1,eq2],x,[f1,f2] shape correctly yet, so anything naming more than one distinct
