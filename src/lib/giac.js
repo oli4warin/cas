@@ -479,8 +479,14 @@ function findTopLevelPipeIndex(s) {
 // at"/substitution list - one or more comma-separated `name=value` assignments, e.g. "x=7" or
 // "x=1,y=2" (as in "2*x+1|x=7", which Giac substitutes x=7 into and returns 15 directly, no
 // subst() call needed). Each part must have a bare "=" (not "==", "!=", "<=", ">=") right after
-// the name for this to count as an assignment rather than a condition.
+// the name for this to count as an assignment rather than a condition. A rhs joined with
+// "and"/"or" (e.g. "a=1 and b=2", restricting several parameters at once - see
+// wrapBareEquation below) is never this substitution shape even though a single "and"-free
+// fragment of it might match the per-part regex on its own: Giac's own "|" substitution list
+// only understands commas, not "and"/"or", so that has to fall through to the condition path
+// instead (which does understand "and"/"or", via splitTopLevelKeyword there).
 function isSubstitutionPipeRhs(pipeRhs) {
+  if (splitTopLevelKeyword(pipeRhs, 'and').length > 1 || splitTopLevelKeyword(pipeRhs, 'or').length > 1) return false;
   const parts = splitTopLevel(pipeRhs, ',');
   return parts.length > 0 && parts.every((p) => /^\s*[A-Za-z_][A-Za-z0-9_]*\s*=(?!=)[^<>]*$/.test(p));
 }
