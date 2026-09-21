@@ -4,15 +4,19 @@ import { giacToLatex } from '../lib/giacToLatex.js';
 import { reinsertableValue } from '../lib/giac.js';
 import { plottableExprForEntry } from '../lib/plottable.js';
 import { saveableExprForEntry } from '../lib/saveable.js';
+import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
 // `onPlot` is called with (index, expr) when the plot button is clicked, only ever present
 // when plottableExprForEntry actually found something to plot (see there) - same check the
 // "p" keyboard shortcut on a selected output uses (see app.js), so both agree on exactly
 // which outputs offer this. `onSave` is the same idea for the "save" button/"s" shortcut and
-// saveableExprForEntry. `showText` is read fresh on every render() call (App owns that as
-// global UI state).
-export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave }) {
+// saveableExprForEntry. `definitions` is read fresh on every call (App's current session
+// state, not frozen at the time this entry was created) purely to decide how a list-index
+// alias in `entry.input` displays (see displayListIndexAliases) - it never affects anything
+// already computed (entry.text/latex/raw are exactly what evaluate() returned). `showText`
+// is read fresh on every render() call too (App owns that as global UI state).
+export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave, definitions }) {
   const plotExpr = plottableExprForEntry(entry);
   const saveExpr = saveableExprForEntry(entry);
   let copiedTimeout = null;
@@ -111,10 +115,10 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave 
   // engine) renders each line's math separately and stacks them in a `gathered` block,
   // rather than joining lines into running text - if any single line fails to convert, the
   // whole thing falls back to plain text together, same as a single line already does.
-  const inputLines = entry.input.split('\n');
+  const inputLines = entry.input.split('\n').map((line) => displayListIndexAliases(line, definitions));
   const inputLatex =
     inputLines.length === 1
-      ? giacToLatex(entry.input) || ''
+      ? giacToLatex(inputLines[0]) || ''
       : (() => {
           const rendered = inputLines.map((line) => giacToLatex(line));
           return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : '';

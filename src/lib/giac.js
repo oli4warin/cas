@@ -7,6 +7,7 @@ import { giacToLatex } from './giacToLatex.js';
 import { XCAS_COMMAND_ALIASES } from './xcasCommands.js';
 import { fitSinusoid } from './sinRegression.js';
 import { fitPolynomial, fitPower, fitExponential, fitLogarithmic, fitLogistic } from './regression.js';
+import { expandListIndexAliases } from './listIndexAlias.js';
 
 const EVAL_TIMEOUT_MS = 15000;
 
@@ -1691,7 +1692,9 @@ export async function evaluate(expr, definitions) {
   const regressionCall = parseRegressionCall(expr);
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
-  const sentExpr = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expr), definitions)))));
+  const sentExpr = normalizePowerCalls(
+    normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions)))),
+  );
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
   if (out.startsWith('GIAC_ERROR')) {
@@ -1963,7 +1966,9 @@ export async function evaluateApprox(expr, definitions) {
   const regressionCall = parseRegressionCall(expr);
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
-  const normalized = normalizePowerCalls(normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expr), definitions)))));
+  const normalized = normalizePowerCalls(
+    normalizeNspireMatrices(normalizeAliasCommands(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions)))),
+  );
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown

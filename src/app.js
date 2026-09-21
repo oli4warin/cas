@@ -17,6 +17,7 @@ import { typesetNode } from './lib/mathjax.js';
 import { applyEntryToDefinitions } from './lib/definitions.js';
 import { plottableExprForEntry } from './lib/plottable.js';
 import { saveableExprForEntry } from './lib/saveable.js';
+import { displayListIndexAliases } from './lib/listIndexAlias.js';
 import { startBridgeHost } from './lib/plotBridge.js';
 import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
 import { makeInitialColumns } from './lib/tableColumns.js';
@@ -611,6 +612,7 @@ export function mountApp(root) {
       onDelete: deleteEntry,
       onPlot: (i, expr) => addExpressionToPlot(expr),
       onSave: (i, expr) => saveEntryVariables(expr),
+      definitions: state.definitions,
     });
     view.setShowText(state.showText);
     const wrapper = h('div', { id: `entry-${idx}` }, view.root);
@@ -642,6 +644,7 @@ export function mountApp(root) {
         onDelete: deleteEntry,
         onPlot: (idx, expr) => addExpressionToPlot(expr),
         onSave: (idx, expr) => saveEntryVariables(expr),
+        definitions: state.definitions,
       });
       view.setShowText(state.showText);
       const wrapper = h('div', { id: `entry-${i}` }, view.root);
@@ -807,7 +810,7 @@ export function mountApp(root) {
 
   function updatePreview() {
     autosizeInput();
-    const latex = giacToLatex(joinInputLines(input.value)) || '';
+    const latex = giacToLatex(displayListIndexAliases(joinInputLines(input.value), state.definitions)) || '';
     clearTimeout(previewDebounce);
     previewDebounce = setTimeout(() => {
       if (latex) {
