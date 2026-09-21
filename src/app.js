@@ -1051,6 +1051,7 @@ export function mountApp(root) {
       state.pauMode = !state.pauMode;
       giacSetPauMode(state.pauMode);
       document.documentElement.classList.toggle('pau-mode', state.pauMode);
+      if (state.pauMode) playBarrelRoll();
       finishModeCommandEntry(displayInput, expr, state.pauMode ? 'pau mode enabled' : 'pau mode disabled', state.pauMode ? 'https://xkcd.com/1292/' : null);
       return;
     }
@@ -1082,6 +1083,23 @@ export function mountApp(root) {
     state.navPos = -1;
     updatePreview();
     updateSelection();
+  }
+
+  // Plays the barrel-roll animation (see the ".barrel-roll" keyframes in styles/index.css)
+  // once on the body - triggered each time pau mode is switched *on* (see the "paumode"
+  // easter egg above). The class is stripped first and its removal forced through with a
+  // reflow read so re-triggering it (paumode off then on again) always restarts the
+  // animation instead of a no-op re-add of a class that's already there; it's then removed
+  // again once the animation ends so the class doesn't linger and block the next replay.
+  function playBarrelRoll() {
+    document.body.classList.remove('barrel-roll');
+    void document.body.offsetWidth;
+    document.body.classList.add('barrel-roll');
+    document.body.addEventListener(
+      'animationend',
+      () => document.body.classList.remove('barrel-roll'),
+      { once: true },
+    );
   }
 
   // Shared tail of the "paumode"/"pimode"/"taumode" easter eggs above - pushes their

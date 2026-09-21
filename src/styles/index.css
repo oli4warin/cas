@@ -70,6 +70,24 @@ body {
   transition: color 0.25s ease;
 }
 
+/* The "paumode" easter egg (see app.js's submit()) plays this once, on the body, the moment
+   pau mode is switched on - a literal barrel roll to match the xkcd link the mode's history
+   entry points at. Removed again right after it finishes (see app.js) so re-toggling pau mode
+   replays it from scratch instead of doing nothing (a still-present class can't restart its
+   own animation). */
+@keyframes barrel-roll {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body.barrel-roll {
+  animation: barrel-roll 0.5s ease-in-out;
+}
+
 #root {
   height: 100svh;
   display: flex;
