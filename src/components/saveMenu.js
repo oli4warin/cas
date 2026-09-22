@@ -5,13 +5,15 @@ import { h } from '../lib/dom.js';
 // this at all) - lets the user type the name to save that output under, either a plain
 // variable name ("a") or a function name with its parameter(s) ("f(x)"). Submitting builds
 // the actual "name:=value" assignment text (Giac's own syntax for both a variable and a
-// function definition - see parseDefinition/lib/definitions.js) and hands it to onSubmit;
+// function definition - see parseDefinition/lib/definitions.js) and hands it, along with the
+// source entry's index (passed into open() so it can be handed straight back), to onSubmit;
 // app.js runs it exactly like it would any other ready-made assignment (see
-// saveEntryVariables), without ever touching the main expression input. Reuses the
+// saveEntryVariables), without ever touching the main expression input, and uses the index to
+// relabel that entry's save button instead of adding a new history entry for it. Reuses the
 // distribution-menu__* styling/markup shared by every small modal like this one (see
 // components/distributionMenu.js) rather than defining its own.
 export function SaveMenu({ onSubmit, onCancel }) {
-  let current = null; // { value } of the output currently being saved, or null when closed
+  let current = null; // { value, index } of the output currently being saved, or null when closed
 
   const nameInput = h('input', { type: 'text', class: 'distribution-menu__input', autocomplete: 'off', placeholder: 'a or f(x)' });
   const valuePreview = h('div', { class: 'distribution-menu__label' });
@@ -32,8 +34,8 @@ export function SaveMenu({ onSubmit, onCancel }) {
   const backdrop = h('div', { class: 'distribution-menu__backdrop', onmousedown: (e) => e.target === backdrop && cancel() }, card);
   backdrop.style.display = 'none';
 
-  function open({ defaultName, value }) {
-    current = { value };
+  function open({ defaultName, value, index }) {
+    current = { value, index };
     nameInput.value = defaultName || '';
     valuePreview.textContent = `= ${value}`;
     backdrop.style.display = '';
@@ -61,8 +63,9 @@ export function SaveMenu({ onSubmit, onCancel }) {
       return;
     }
     const expr = `${name}:=${current.value}`;
+    const { index } = current;
     close();
-    onSubmit(expr);
+    onSubmit(expr, index);
   }
 
   function isOpen() {

@@ -112,7 +112,12 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   // saveInfo above) - stopPropagation for the same reason as plotBtn's. Saves outright when
   // saveInfo already names it unambiguously (a solve() result); otherwise opens the naming
   // menu (see saveMenu.js) to ask - see handleSaveEntry/app.js, which onSave is wired to, same
-  // as the "s" shortcut.
+  // as the "s" shortcut. A successful save doesn't add its own history entry (see
+  // saveEntryVariables/app.js) - instead it calls setSavedLabel below, which relabels this
+  // button "saved to <name>" so the outcome is still visible right here. `entry.savedAs`
+  // carries that label forward if this entry has to be rebuilt from scratch (e.g. an earlier
+  // entry's deletion renumbers everything after it - see deleteEntry/app.js), so re-rendering
+  // doesn't forget a save that already happened.
   const saveBtn = h(
     'button',
     {
@@ -125,9 +130,14 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
         onSave(index, saveInfo);
       },
     },
-    'save',
+    entry.savedAs ? `saved to ${entry.savedAs}` : 'save',
   );
   if (!saveInfo) saveBtn.style.display = 'none';
+
+  function setSavedLabel(label) {
+    entry.savedAs = label;
+    saveBtn.textContent = `saved to ${label}`;
+  }
 
   const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, plotBtn, saveBtn, inputRow, outputRow);
 
@@ -205,5 +215,5 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     copyToClipboard(part, part === 'input' ? entry.input : reinsertableValue(entry.raw));
   }
 
-  return { root, setSelected, setShowText, copy };
+  return { root, setSelected, setShowText, copy, setSavedLabel };
 }

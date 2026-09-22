@@ -16,7 +16,7 @@ import {
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
-import { applyEntryToDefinitions } from './lib/definitions.js';
+import { applyEntryToDefinitions, parseDefinition, parseMultiDefinition, definitionLabel } from './lib/definitions.js';
 import { plottableExprForEntry } from './lib/plottable.js';
 import { saveableForEntry } from './lib/saveable.js';
 import { displayListIndexAliases } from './lib/listIndexAlias.js';
@@ -304,8 +304,8 @@ export function mountApp(root) {
     onCancel: () => input.focus(),
   });
   const saveMenu = SaveMenu({
-    onSubmit: (expr) => {
-      saveEntryVariables(expr);
+    onSubmit: (expr, index) => {
+      saveEntryVariables(expr, index);
       input.focus();
     },
     onCancel: () => input.focus(),
@@ -645,7 +645,7 @@ export function mountApp(root) {
       onSelect: selectHistory,
       onDelete: deleteEntry,
       onPlot: (i, expr) => addExpressionToPlot(expr),
-      onSave: (i, info) => handleSaveEntry(info),
+      onSave: (i, info) => handleSaveEntry(i, info),
       definitions: state.definitions,
     });
     view.setShowText(state.showText);
@@ -677,7 +677,7 @@ export function mountApp(root) {
         onSelect: selectHistory,
         onDelete: deleteEntry,
         onPlot: (idx, expr) => addExpressionToPlot(expr),
-        onSave: (idx, info) => handleSaveEntry(info),
+        onSave: (idx, info) => handleSaveEntry(idx, info),
         definitions: state.definitions,
       });
       view.setShowText(state.showText);
@@ -1124,21 +1124,47 @@ export function mountApp(root) {
     updateSelection();
   }
 
+  // Returns the "a" / "f(x)" / "a, b" label a just-run "name:=value" (or multi-variable
+  // "a,b:=1,2") assignment statement defines, for display on the source entry's save button
+  // (see setSavedLabel below) - or null if `saveExpr` isn't a definition after all (shouldn't
+  // happen given how saveExpr is always built, but guards against surprises rather than
+  // asserting).
+  function labelForSaveExpr(saveExpr) {
+    const def = parseDefinition(saveExpr);
+    if (def) return definitionLabel(def);
+    const multiDefs = parseMultiDefinition(saveExpr);
+    if (multiDefs) return multiDefs.map((d) => d.name).join(', ');
+    return null;
+  }
+
   // Runs a "name:=value" (or "f(x):=value") assignment statement exactly like submit() would
-  // if the user had typed and pressed Enter on it - pushes its own new history entry and
-  // folds the resulting definitions in - but without touching the CAS input box at all
-  // (unlike submit(), which always reads/clears `input.value`), since the user didn't type
-  // this into it. Called either with an entry's own ready-made saveExpr (the "quick save"
-  // path - see handleSaveEntry) or with what the save menu just built from a typed name (see
-  // saveMenu.js's onSubmit above).
-  async function saveEntryVariables(saveExpr) {
+  // if the user had typed and pressed Enter on it, and folds the resulting definitions in -
+  // but without touching the CAS input box at all (unlike submit(), which always reads/clears
+  // `input.value`), since the user didn't type this into it. Unlike submit(), a successful
+  // save doesn't get its own history entry either - it's not something the user typed, so
+  // cluttering the notebook with "a:=5" would just be noise; instead the entry the value came
+  // from (`sourceIndex`, when known) has its own "save" button relabelled "saved to a" (see
+  // setSavedLabel/historyEntry.js) so the outcome is still visible right where it happened. A
+  // failed save (e.g. an invalid name) still gets a history entry, same as before, so the
+  // error is visible somewhere. Called either with an entry's own ready-made saveExpr (the
+  // "quick save" path - see handleSaveEntry) or with what the save menu just built from a
+  // typed name (see saveMenu.js's onSubmit above).
+  async function saveEntryVariables(saveExpr, sourceIndex) {
     if (!saveExpr || state.status !== 'ready' || state.busy) return;
     state.busy = true;
     renderStatus();
     const result = await giacEvaluate(saveExpr, state.definitions);
     state.busy = false;
     renderStatus();
-    pushHistoryEntry({ input: saveExpr, ...result });
+    if (result.isError) {
+      pushHistoryEntry({ input: saveExpr, ...result });
+    } else {
+      const label = labelForSaveExpr(saveExpr);
+      if (label && sourceIndex != null && state.history[sourceIndex]) {
+        state.history[sourceIndex].savedAs = label;
+        entryViews[sourceIndex]?.setSavedLabel(label);
+      }
+    }
     setDefinitions(applyEntryToDefinitions(state.definitions, saveExpr, result));
     state.navPos = -1;
     updateSelection();
@@ -1147,14 +1173,16 @@ export function mountApp(root) {
   // Entry point for the entry's own "save" button (or the "s" shortcut) - see
   // pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
   // handleKeyDown below, same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
-  // `info` is whatever saveableForEntry (lib/saveable.js) found: a solve()-style result
-  // already carries an unambiguous name to save under, so that runs immediately, same as
-  // before the naming menu existed; anything else has no name of its own, so this opens the
-  // menu instead and lets saveMenu's onSubmit (above) call saveEntryVariables once one's typed.
-  function handleSaveEntry(info) {
+  // `index` is that entry's position in state.history, threaded through to saveEntryVariables
+  // so it knows which entry's save button to relabel once the name is known. `info` is
+  // whatever saveableForEntry (lib/saveable.js) found: a solve()-style result already carries
+  // an unambiguous name to save under, so that runs immediately, same as before the naming
+  // menu existed; anything else has no name of its own, so this opens the menu instead and
+  // lets saveMenu's onSubmit (above) call saveEntryVariables once one's typed.
+  function handleSaveEntry(index, info) {
     if (!info) return;
-    if (info.quickExpr) saveEntryVariables(info.quickExpr);
-    else saveMenu.open(info);
+    if (info.quickExpr) saveEntryVariables(info.quickExpr, index);
+    else saveMenu.open({ ...info, index });
   }
 
   function setDefinitions(next) {
@@ -1295,7 +1323,7 @@ export function mountApp(root) {
       const saveInfo = saveableForEntry(state.history[step.idx]);
       if (saveInfo) {
         e.preventDefault();
-        handleSaveEntry(saveInfo);
+        handleSaveEntry(step.idx, saveInfo);
         return;
       }
     }
