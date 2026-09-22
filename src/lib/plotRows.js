@@ -12,11 +12,12 @@ let nextRowId = 1;
 export function makeRow() {
   return {
     id: nextRowId++,
-    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter'
+    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq'
     expr: '',
     exprX: '',
     exprY: '',
     exprZ: '',
+    exprDE: '',
     tmin: DEFAULT_TMIN,
     tmax: DEFAULT_TMAX,
     visible: true,

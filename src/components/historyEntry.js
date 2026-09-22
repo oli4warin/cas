@@ -2,18 +2,23 @@ import { h } from '../lib/dom.js';
 import { typesetNode } from '../lib/mathjax.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
 import { reinsertableValue } from '../lib/giac.js';
-import { plottableExprForEntry } from '../lib/plottable.js';
+import { plottableInputForEntry, plottableOutputForEntry } from '../lib/plottable.js';
 import { saveableForEntry } from '../lib/saveable.js';
 import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
-// `onPlot` is called with (index, expr) when the plot button is clicked, only ever present
-// when plottableExprForEntry actually found something to plot (see there) - same check the
-// "p" keyboard shortcut on a selected output uses (see app.js), so both agree on exactly
-// which outputs offer this. `onSave` is the same idea for the "save" button/"s" shortcut and
-// saveableForEntry, called with (index, info) - `info` is either { quickExpr } (a solve()
-// result, saved outright) or { defaultName, value } (anything else, opens the naming menu -
-// see components/saveMenu.js) - see handleSaveEntry/app.js, which decides between the two.
+// `onPlot` is called with (index, spec) - spec being whatever plottableInputForEntry/
+// plottableOutputForEntry found (see there) - when one of the two "plot" buttons is clicked,
+// each only ever present when its own check actually found something to plot: the input's
+// button offers what the *equation/definition typed in* means (e.g. a differential equation's
+// vector field), the output's offers the *computed result* (e.g. that equation's solution
+// curve) - independently, so an entry can show either, both, or neither. Same two checks the
+// "p" keyboard shortcut uses on whichever half is currently selected (see app.js), so both
+// agree on exactly which half offers this. `onSave` is the same idea for the "save"
+// button/"s" shortcut and saveableForEntry, called with (index, info) - `info` is either
+// { quickExpr } (a solve() result, saved outright) or { defaultName, value } (anything else,
+// opens the naming menu - see components/saveMenu.js) - see handleSaveEntry/app.js, which
+// decides between the two.
 // `definitions` is read fresh on every
 // call (App's current session state, not frozen at the time this entry was created) purely to
 // decide how a list-index alias in `entry.input` displays (see displayListIndexAliases) - it
@@ -21,7 +26,8 @@ import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 // returned). `showText` is read fresh on every render() call too (App owns that as global UI
 // state).
 export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave, definitions }) {
-  const plotExpr = plottableExprForEntry(entry);
+  const inputPlotSpec = plottableInputForEntry(entry);
+  const outputPlotSpec = plottableOutputForEntry(entry);
   const saveInfo = saveableForEntry(entry);
   let copiedTimeout = null;
 
@@ -56,11 +62,37 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   outputCopied.style.display = 'none';
   const outputContent = h('div', { class: 'entry__content' }, resultMath, errorText, plainText, outputRawText);
 
+  // One of these per row, each only rendered at all when that specific half is actually
+  // plottable (see inputPlotSpec/outputPlotSpec above) - stopPropagation keeps its click from
+  // also bubbling to the row's own onclick (which would otherwise copy that half to the
+  // clipboard at the same time).
+  function makeRowPlotBtn(spec, label) {
+    const btn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'entry__rowPlot',
+        'aria-label': label,
+        title: `${label} (p)`,
+        onclick: (e) => {
+          e.stopPropagation();
+          onPlot(index, spec);
+        },
+      },
+      'plot',
+    );
+    if (!spec) btn.style.display = 'none';
+    return btn;
+  }
+  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function');
+  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result');
+
   const inputRow = h(
     'div',
     { class: 'entry__input', role: 'button', tabindex: 0, onclick: () => copyToClipboard('input', entry.input) },
     h('span', { class: 'entry__prompt' }, `In[${index + 1}]`),
     inputContent,
+    inputPlotBtn,
     inputCopied,
   );
 
@@ -74,6 +106,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     },
     h('span', { class: 'entry__prompt' }, `Out[${index + 1}]`),
     outputContent,
+    outputPlotBtn,
     outputCopied,
   );
 
@@ -89,30 +122,11 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     '×',
   );
 
-  // Only rendered at all when this output is actually plottable (see plotExpr above) -
-  // stopPropagation keeps its click from also bubbling to outputRow's own onclick (which
-  // would otherwise copy the output to the clipboard at the same time).
-  const plotBtn = h(
-    'button',
-    {
-      type: 'button',
-      class: 'entry__plot',
-      'aria-label': 'Plot this function',
-      title: 'Plot this function (p)',
-      onclick: (e) => {
-        e.stopPropagation();
-        onPlot(index, plotExpr);
-      },
-    },
-    'plot',
-  );
-  if (!plotExpr) plotBtn.style.display = 'none';
-
   // Only rendered at all when this output actually has something plain enough to save (see
-  // saveInfo above) - stopPropagation for the same reason as plotBtn's. Saves outright when
-  // saveInfo already names it unambiguously (a solve() result); otherwise opens the naming
-  // menu (see saveMenu.js) to ask - see handleSaveEntry/app.js, which onSave is wired to, same
-  // as the "s" shortcut. A successful save doesn't add its own history entry (see
+  // saveInfo above) - stopPropagation for the same reason as the plot buttons above. Saves
+  // outright when saveInfo already names it unambiguously (a solve() result); otherwise opens
+  // the naming menu (see saveMenu.js) to ask - see handleSaveEntry/app.js, which onSave is
+  // wired to, same as the "s" shortcut. A successful save doesn't add its own history entry (see
   // saveEntryVariables/app.js) - instead it calls setSavedLabel below, which relabels this
   // button "saved to <name>" so the outcome is still visible right here. `entry.savedAs`
   // carries that label forward if this entry has to be rebuilt from scratch (e.g. an earlier
@@ -139,7 +153,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     saveBtn.textContent = `saved to ${label}`;
   }
 
-  const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, plotBtn, saveBtn, inputRow, outputRow);
+  const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, saveBtn, inputRow, outputRow);
 
   // Same best-effort syntax-only converter as the live input preview (see app.js) - it
   // never touches the engine, so a submitted input renders identically to how it looked

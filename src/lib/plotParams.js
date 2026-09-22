@@ -13,8 +13,12 @@
 
 import { collectFreeVariables, expandKnownFunctionCalls } from './giac.js';
 
-const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [] };
-const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [] };
+// diffeq gets no sliders of its own: its axes are already spoken for (x/y, or the phase
+// plane y/y' for a 2nd-order equation - see plotDiffEq.js), and any other name it mentions
+// resolves the same way any bare CAS expression's would - through a value the user has
+// already assigned this session (e.g. "a:=2"), same as typing it at the prompt.
+const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [], diffeq: [] };
+const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [], diffeq: [] };
 
 const DEFAULT_SLIDER = { value: 1, min: -10, max: 10, step: 0.1 };
 

@@ -1,7 +1,7 @@
 import { h, clear, reconcileOrder } from '../lib/dom.js';
 import { definitionLabel } from '../lib/definitions.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
-import { sampleFunction, sampleParametric, sampleComplex, sampleScatter } from '../lib/plotSample.js';
+import { sampleFunction, sampleParametric, sampleComplex, sampleScatter, sampleDiffEqField } from '../lib/plotSample.js';
 import { DEFAULT_VIEW, makeRow } from '../lib/plotRows.js';
 import { collectRowParams, reconcileSliders } from '../lib/plotParams.js';
 import { FormulaPreview } from './formulaPreview.js';
@@ -20,6 +20,7 @@ function rowColor(row, index) {
 // handleFieldKeyDown).
 function fieldOrder(row) {
   if (row.mode === 'complex') return ['exprZ'];
+  if (row.mode === 'diffeq') return ['exprDE'];
   if (row.mode === 'parametric' || row.mode === 'scatter') return ['exprX', 'exprY'];
   return ['expr'];
 }
@@ -149,6 +150,48 @@ function draw(canvas, rawView, curves, aspectLocked) {
       continue;
     }
 
+    if (curve.style === 'field') {
+      ctx.strokeStyle = curve.color;
+      ctx.fillStyle = curve.color;
+      ctx.lineWidth = 1.5;
+      const ARROW_LEN = 12;
+      const HEAD_LEN = 4;
+      for (const { x, y, dx, dy } of curve.points) {
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+        if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
+        const mag = Math.hypot(dx, dy);
+        if (!(mag > 0)) continue;
+        // Direction only - a vector/slope field is about where it points, not how long the
+        // raw (x',y') happens to be, which can range from ~0 near an equilibrium to huge near
+        // a singularity. Normalized in data space first, then re-normalized after the
+        // to-pixel transform so it still reads as "a direction" even with independent x/y
+        // scaling (aspect unlocked).
+        let vx = (dx / mag) * pxPerX;
+        let vy = -(dy / mag) * pxPerY;
+        const vmag = Math.hypot(vx, vy) || 1;
+        vx /= vmag;
+        vy /= vmag;
+        const cx = toPx(x);
+        const cy = toPy(y);
+        const x1 = cx - (ARROW_LEN / 2) * vx;
+        const y1 = cy - (ARROW_LEN / 2) * vy;
+        const x2 = cx + (ARROW_LEN / 2) * vx;
+        const y2 = cy + (ARROW_LEN / 2) * vy;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        const ang = Math.atan2(vy, vx);
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - HEAD_LEN * Math.cos(ang - Math.PI / 6), y2 - HEAD_LEN * Math.sin(ang - Math.PI / 6));
+        ctx.lineTo(x2 - HEAD_LEN * Math.cos(ang + Math.PI / 6), y2 - HEAD_LEN * Math.sin(ang + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+      }
+      continue;
+    }
+
     ctx.strokeStyle = curve.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -209,6 +252,7 @@ function createRowView({
     h('option', { value: 'parametric' }, 'x(t), y(t)'),
     h('option', { value: 'complex' }, 'z(t) complex'),
     h('option', { value: 'scatter' }, 'scatter (x,y) data'),
+    h('option', { value: 'diffeq' }, 'differential equation'),
   );
   const fieldsWrap = h('span');
   const toggleBtn = h('button', { type: 'button', class: 'plot-row__toggle', onclick: onToggle }, '●');
@@ -267,6 +311,12 @@ function createRowView({
         makeField('exprX', 'x data, e.g. [1,2,3] or a column name', 'x data'),
         makeField('exprY', 'y data, e.g. [4,5,6] or a column name', 'y data'),
       );
+    } else if (mode === 'diffeq') {
+      const field = makeField('exprDE', "y'=f(x,y) or y''-y'-y=0", 'ODE');
+      field.title =
+        "1st order (y'=...): direction field over the x/y axes. " +
+        "2nd order (y''=...): phase-plane vector field over y/y' instead (autonomous equations only).";
+      fieldsWrap.append(field);
     } else {
       fieldsWrap.append(makeField('expr', 'e.g. sin(x), f(x), a*x+b, sin(x)|0<x<7', undefined));
     }
@@ -681,7 +731,7 @@ export function PlotPanel({
       color: rowColor(row, i),
       visible: row.visible,
       points: curves[row.id]?.points,
-      style: row.mode === 'scatter' ? 'points' : 'line',
+      style: row.mode === 'scatter' ? 'points' : row.mode === 'diffeq' ? 'field' : 'line',
     }));
   }
 
@@ -715,8 +765,13 @@ export function PlotPanel({
     const myRequest = ++requestId;
     const width = canvas.clientWidth || 600;
     const height = canvas.clientHeight || 400;
-    const { xmin, xmax } = aspectLocked ? equalAspectView(view, width, height) : view;
+    const effView = aspectLocked ? equalAspectView(view, width, height) : view;
+    const { xmin, xmax } = effView;
     const points = Math.max(120, Math.min(700, Math.round(width / 2)));
+    // Aiming for roughly one arrow per ~32px keeps the field dense enough to actually read
+    // as a flow, without so many arrows they blur into a solid smear.
+    const fieldNx = Math.max(10, Math.min(40, Math.round(width / 32)));
+    const fieldNy = Math.max(8, Math.min(30, Math.round(height / 32)));
 
     for (const row of rows) {
       const applyResult = (pts) => {
@@ -750,6 +805,12 @@ export function PlotPanel({
           continue;
         }
         sampleScatter(evaluateRaw, row.exprX, row.exprY).then(applyResult, applyError);
+      } else if (row.mode === 'diffeq') {
+        if (!row.exprDE.trim()) {
+          delete curves[row.id];
+          continue;
+        }
+        sampleDiffEqField(evaluateRaw, row.exprDE, effView, fieldNx, fieldNy).then(applyResult, applyError);
       } else {
         if (!row.expr.trim()) {
           delete curves[row.id];

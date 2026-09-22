@@ -6,6 +6,7 @@
 import { normalizePowerCalls } from './giac.js';
 import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js';
 import { substitutePlotParams } from './plotParams.js';
+import { parseDiffEq, buildFieldComponents } from './plotDiffEq.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -192,6 +193,95 @@ export async function sampleComplex(evaluateRaw, exprZ, tmin, tmax, points, slid
   if (!pts) throw new Error('Unexpected response from the CAS engine.');
   if (pts.length > 0 && pts.every((p) => Number.isNaN(p.x) || Number.isNaN(p.y))) {
     throw new Error('No real output over this t range (undefined name?).');
+  }
+
+  return pts;
+}
+
+// Parses solve()'s raw list output into its (still-symbolic, not necessarily numeric)
+// solution strings - unlike parseSampleList, these are Giac expressions in other variables,
+// not numbers to evalf, so NUMBER_RE doesn't apply here. For a single solve variable (all this
+// mode ever asks for - see sampleDiffEqField below), Giac hands back its own "list[...]" form
+// (confirmed against the actual engine, and matching giac.js's own parseSolveTuples/
+// formatSolveResultApprox, which accept the same two shapes for the same reason) rather than a
+// bare "[...]" bracket - "[...]" is also accepted since fsolve/zeros use that flatter shape,
+// and there's no reason to reject it here if Giac ever returns it for solve() too.
+function parseSolveList(raw) {
+  const s = raw.trim();
+  let inner;
+  if (s.startsWith('list[') && s.endsWith(']')) inner = s.slice(5, -1);
+  else if (s.startsWith('[') && s.endsWith(']')) inner = s.slice(1, -1);
+  else return null;
+  if (!inner.trim()) return [];
+  return splitTopLevel(inner).map((t) => t.trim());
+}
+
+// Same grid-batching idea as buildSampleExpr, generalized to two dimensions: `k` ranges over
+// every cell of an nx-by-ny grid over [xmin,xmax]x[ymin,ymax], decoded back into its (gx,gy)
+// coordinates via integer div/mod, and `comp1`/`comp2` (Giac expressions in the generic grid
+// variables "gx"/"gy" - see buildFieldComponents in plotDiffEq.js) are evaluated there via the
+// same subst() chaining plotParams.js uses for slider values. One round trip evaluates every
+// arrow in the field at once.
+export function buildFieldSampleExpr(comp1, comp2, xmin, xmax, ymin, ymax, nx, ny) {
+  const nX = Math.max(2, Math.floor(nx));
+  const nY = Math.max(2, Math.floor(ny));
+  const stepX = (xmax - xmin) / (nX - 1);
+  const stepY = (ymax - ymin) / (nY - 1);
+  const gxAt = `(${formatNum(xmin)})+(iquo(k,${nY}))*(${formatNum(stepX)})`;
+  const gyAt = `(${formatNum(ymin)})+(irem(k,${nY}))*(${formatNum(stepY)})`;
+  const sub = (e) => `subst(subst((${e}),gx=(${gxAt})),gy=(${gyAt}))`;
+  const n = nX * nY;
+  return `evalf(seq([${gxAt},${gyAt},${sub(comp1)},${sub(comp2)}],k,0,${n - 1}))`;
+}
+
+// Parses buildFieldSampleExpr()'s output - a flat list of [gx,gy,dx,dy] quads - into arrow
+// data for the plot panel's 'field' curve style. Same NaN-for-anything-not-a-plain-real
+// treatment as parseSampleList; the renderer just skips a non-finite arrow instead of drawing
+// a gap (there's no line to break).
+export function parseFieldList(raw) {
+  const s = raw.trim();
+  if (!s.startsWith('[') || !s.endsWith(']')) return null;
+  const inner = s.slice(1, -1);
+  if (!inner.trim()) return [];
+  const parseOne = (tok) => (NUMBER_RE.test(tok.trim()) ? parseFloat(tok) : NaN);
+  return splitTopLevel(inner).map((tok) => {
+    const t = tok.trim();
+    if (!t.startsWith('[') || !t.endsWith(']')) return { x: NaN, y: NaN, dx: NaN, dy: NaN };
+    const [xTok = '', yTok = '', dxTok = '', dyTok = ''] = splitTopLevel(t.slice(1, -1));
+    return { x: parseOne(xTok), y: parseOne(yTok), dx: parseOne(dxTok), dy: parseOne(dyTok) };
+  });
+}
+
+// Samples a differential-equation row's vector field over `view` on an nx-by-ny grid: asks
+// Giac to isolate the equation's highest derivative once, then batches every arrow's vector
+// into the one evaluateRaw() round trip buildFieldSampleExpr builds. See plotDiffEq.js for the
+// equation parsing/reduction this builds on.
+export async function sampleDiffEqField(evaluateRaw, rawExpr, view, nx, ny) {
+  const trimmed = rawExpr.trim();
+  if (!trimmed) return [];
+
+  const { order, solveVar, eqForSolve } = parseDiffEq(trimmed);
+
+  const solveOut = await evaluateRaw(`solve(${eqForSolve},${solveVar})`);
+  if (solveOut.startsWith('GIAC_ERROR')) {
+    throw new Error(solveOut.slice(11).trim() || 'Could not solve this equation for its highest derivative.');
+  }
+  const solutions = parseSolveList(solveOut);
+  if (!solutions || solutions.length === 0) {
+    throw new Error(`Could not isolate ${solveVar === 'D2Y' ? "y''" : "y'"} - try an equation linear in the highest derivative.`);
+  }
+
+  const { comp1, comp2 } = buildFieldComponents(order, solutions[0]);
+  const { xmin, xmax, ymin, ymax } = view;
+  const out = await evaluateRaw(buildFieldSampleExpr(comp1, comp2, xmin, xmax, ymin, ymax, nx, ny));
+  if (out.startsWith('GIAC_ERROR')) {
+    throw new Error(out.slice(11).trim() || 'Could not evaluate this vector field.');
+  }
+
+  const pts = parseFieldList(out);
+  if (!pts) throw new Error('Unexpected response from the CAS engine.');
+  if (pts.length > 0 && pts.every((p) => !Number.isFinite(p.dx) || !Number.isFinite(p.dy))) {
+    throw new Error('No real vectors in the current view (undefined name, or complex-valued here?).');
   }
 
   return pts;

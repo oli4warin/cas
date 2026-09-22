@@ -17,7 +17,7 @@ import {
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
 import { applyEntryToDefinitions, parseDefinition, parseMultiDefinition, definitionLabel } from './lib/definitions.js';
-import { plottableExprForEntry } from './lib/plottable.js';
+import { plottableInputForEntry, plottableOutputForEntry } from './lib/plottable.js';
 import { saveableForEntry } from './lib/saveable.js';
 import { displayListIndexAliases } from './lib/listIndexAlias.js';
 import { startBridgeHost } from './lib/plotBridge.js';
@@ -443,7 +443,7 @@ export function mountApp(root) {
     h('span', null, 'Enter on empty input repeats the last one'),
     h('span', null, 'Esc clear selection (or return to input from plot/table)'),
     h('span', null, 'Backspace on a selected entry deletes it'),
-    h('span', null, 'p on a selected entry with a plottable output sends it to the plot panel'),
+    h('span', null, 'p on a selected input/output sends it to the plot panel, if plottable'),
     h('span', null, 'Alt+P plot · Alt+T table'),
   );
   const hintsToggle = h(
@@ -644,7 +644,7 @@ export function mountApp(root) {
       index: idx,
       onSelect: selectHistory,
       onDelete: deleteEntry,
-      onPlot: (i, expr) => addExpressionToPlot(expr),
+      onPlot: (i, spec) => addExpressionToPlot(spec),
       onSave: (i, info) => handleSaveEntry(i, info),
       definitions: state.definitions,
     });
@@ -676,7 +676,7 @@ export function mountApp(root) {
         index: i,
         onSelect: selectHistory,
         onDelete: deleteEntry,
-        onPlot: (idx, expr) => addExpressionToPlot(expr),
+        onPlot: (idx, spec) => addExpressionToPlot(spec),
         onSave: (idx, info) => handleSaveEntry(idx, info),
         definitions: state.definitions,
       });
@@ -1172,7 +1172,8 @@ export function mountApp(root) {
 
   // Entry point for the entry's own "save" button (or the "s" shortcut) - see
   // pushHistoryEntry/deleteEntry's own HistoryEntry() calls and the "s" shortcut in
-  // handleKeyDown below, same pairing as addExpressionToPlot/plottableExprForEntry for "plot".
+  // handleKeyDown below, same pairing as addExpressionToPlot/plottableInputForEntry/
+  // plottableOutputForEntry for "plot".
   // `index` is that entry's position in state.history, threaded through to saveEntryVariables
   // so it knows which entry's save button to relabel once the name is known. `info` is
   // whatever saveableForEntry (lib/saveable.js) found: a solve()-style result already carries
@@ -1299,24 +1300,27 @@ export function mountApp(root) {
     // (otherwise empty, while browsing) input's text cursor.
     const step = currentStep();
 
-    // "p" with an entry selected (its input or its output - either half, same as Backspace
-    // below deletes the whole entry regardless of which half is selected) sends that entry's
-    // plottable output straight to the plot panel instead of typing "p" into the input. Only
-    // intercepted when plottableExprForEntry actually finds something (see there and the
-    // entry's own always-visible "plot" button in historyEntry.js, which shows under the
-    // same check) - otherwise "p" types normally, same as any other key while browsing (see
-    // onInputChanged, which drops the selection the moment typing resumes).
+    // "p" with an entry selected sends whichever half is currently selected - its input or
+    // its output (see currentStep/setSelected) - straight to the plot panel instead of typing
+    // "p" into the input, using whichever of plottableInputForEntry/plottableOutputForEntry
+    // matches that half so e.g. a selected "y'=x-y" input plots the differential equation
+    // itself while its selected output plots the solution curve instead (see lib/plottable.js).
+    // Only intercepted when that check actually finds something (see there and the entry's own
+    // always-visible "plot" buttons in historyEntry.js, which show under the same checks) -
+    // otherwise "p" types normally, same as any other key while browsing (see onInputChanged,
+    // which drops the selection the moment typing resumes).
     if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
-      const plotExpr = plottableExprForEntry(state.history[step.idx]);
-      if (plotExpr) {
+      const entry = state.history[step.idx];
+      const plotSpec = step.part === 'input' ? plottableInputForEntry(entry) : plottableOutputForEntry(entry);
+      if (plotSpec) {
         e.preventDefault();
-        addExpressionToPlot(plotExpr);
+        addExpressionToPlot(plotSpec);
         return;
       }
     }
 
     // "s" with an entry selected saves that entry's output - same idea as "p" above, but for
-    // saveableForEntry/handleSaveEntry instead of plottableExprForEntry/addExpressionToPlot
+    // saveableForEntry/handleSaveEntry instead of plottableOutputForEntry/addExpressionToPlot
     // (see there, and the entry's own always-visible "save" button in historyEntry.js, which
     // shows under the same check).
     if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
@@ -1487,19 +1491,25 @@ export function mountApp(root) {
     renderLayout();
   }
 
-  // Sends a history entry's plottable output (see lib/plottable.js) to the plot panel -
-  // wired to both the entry's own "plot" button (historyEntry.js) and the "p" keyboard
-  // shortcut on a selected output (handleKeyDown above). Reuses the first still-blank
-  // function row if there is one (the spare row a freshly opened/emptied panel always
-  // keeps ready to type into - see focusOnMount in plotPanel.js) rather than always adding
-  // a new one, so plotting right after opening the panel for the first time doesn't leave
-  // two rows where one would do.
-  function addExpressionToPlot(expr) {
-    const blankIdx = state.plotRows.findIndex((r) => r.mode === 'function' && !r.expr.trim());
+  // Sends a history entry's plottable input or output (see lib/plottable.js) to the plot
+  // panel - wired to both the entry's own two "plot" buttons (historyEntry.js) and the "p"
+  // keyboard shortcut on whichever half is currently selected (handleKeyDown above). `spec` is
+  // `{mode, expr}` - 'function' for an ordinary y=f(x) curve (from either a function-defining
+  // input or a plain output, see plottableInputForEntry/plottableOutputForEntry), 'diffeq' for
+  // a differential equation's vector field. Reuses the first still-blank row of that *same*
+  // mode if there is one (the spare row a freshly opened/emptied panel always keeps ready to
+  // type into - see focusOnMount in plotPanel.js) rather than always adding a new one, so
+  // plotting right after opening the panel for the first time doesn't leave two rows where one
+  // would do; a blank row of a *different* mode is left alone, since e.g. a blank function row
+  // isn't a valid place to drop a differential equation's text.
+  const PLOT_SPEC_FIELD = { function: 'expr', diffeq: 'exprDE' };
+  function addExpressionToPlot({ mode, expr }) {
+    const field = PLOT_SPEC_FIELD[mode];
+    const blankIdx = state.plotRows.findIndex((r) => r.mode === mode && !r[field].trim());
     const nextRows =
       blankIdx !== -1
-        ? state.plotRows.map((r, i) => (i === blankIdx ? { ...r, expr } : r))
-        : [...state.plotRows, { ...makeRow(), expr }];
+        ? state.plotRows.map((r, i) => (i === blankIdx ? { ...r, [field]: expr } : r))
+        : [...state.plotRows, { ...makeRow(), mode, [field]: expr }];
     state.plotRows = nextRows;
 
     if (state.plotOpen) {
