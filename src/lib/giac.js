@@ -1702,7 +1702,7 @@ function fixImaginaryUnit(latex) {
 // Rewrite it to the same pi-tau-overlap glyph giacToLatex.js's own GREEK table uses for the
 // live preview, so a "paumode" result (see setPauMode/piToTau above) matches what was typed.
 // Braced so a following "^"/"_" groups only the symbol, not whatever comes after it.
-const PAU_SYMBOL = '\\pi\\hspace{-0.2em}\\tau\\hspace{-0.77em}/\\hspace{-0.5em}\\backslash';
+const PAU_SYMBOL = '\\tau\\hspace{-0.31em}\\pi';
 const PAU_RE = /\bpau\b/g;
 function fixPauSymbol(latex) {
   return latex.replace(PAU_RE, `{${PAU_SYMBOL}}`);
