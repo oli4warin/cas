@@ -444,6 +444,7 @@ export function mountApp(root) {
     h('span', null, 'Esc clear selection (or return to input from plot/table)'),
     h('span', null, 'Backspace on a selected entry deletes it'),
     h('span', null, 'p on a selected input/output sends it to the plot panel, if plottable'),
+    h('span', null, 's on a selected input/output saves it, if saveable'),
     h('span', null, 'Alt+P plot · Alt+T table'),
   );
   const hintsToggle = h(
