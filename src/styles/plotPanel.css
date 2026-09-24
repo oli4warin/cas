@@ -229,6 +229,12 @@
   white-space: nowrap;
 }
 
+.plot-row__distProb {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text-h);
+}
+
 .plot-row__tInput {
   width: 68px;
   font-family: var(--mono);

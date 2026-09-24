@@ -8,6 +8,13 @@ import { XCAS_COMMAND_ALIASES, expandInverseTrigAliases } from './xcasCommands.j
 import { fitSinusoid } from './sinRegression.js';
 import { fitPolynomial, fitPower, fitExponential, fitLogarithmic, fitLogistic } from './regression.js';
 import { expandListIndexAliases } from './listIndexAlias.js';
+import {
+  parseDistributionCdfCall,
+  resolveDistributionCdfPlan,
+  distributionSymbolLatex,
+  distributionSymbolText,
+  DISTRIBUTION_FAMILIES,
+} from './distributionParams.js';
 
 const EVAL_TIMEOUT_MS = 15000;
 
@@ -1793,7 +1800,7 @@ function formatApproxSci(str) {
 // True when `a` and `b` are literally the same number - compares their normalized
 // significant digits/exponent (see parseDecimal) rather than raw text, since Giac's own tail
 // can be in a different shape (scientific) than the value it's previewing.
-function sameNumericValue(a, b) {
+export function sameNumericValue(a, b) {
   const pa = parseDecimal(a);
   const pb = parseDecimal(b);
   return !!pa && !!pb && pa.sign === pb.sign && pa.sig === pb.sig && pa.exponent === pb.exponent;
@@ -2023,6 +2030,95 @@ async function evaluateNormalCdf(normalCdfCall) {
   return { raw: displayValue, isError: false, text: formatted.text, latex: formatted.latex, isGraphics: false };
 }
 
+// Builds the {raw, text, latex} result for any *other* distribution's _cdf(...) call -
+// normald_cdf has its own dedicated handling above (evaluateNormalCdf/parseNormalCdfCall),
+// kept separate rather than folded into this so this addition can't destabilize its own
+// already-verified infinity-bound workaround. Mirrors its overall shape - drop a bound that's
+// at the family's own natural support extreme down to a single relation (e.g.
+// "binomial_cdf(10,0.5,0,6)" -> "P(Bin(10,0.5)<=6)", 0 being Binomial's own natural minimum),
+// mark "=" only when the value is genuinely exact - generalized across every other _cdf family
+// and its own standard notation (see distributionSymbolLatex/distributionSymbolText in
+// distributionParams.js). The actual "what to compute" decision - carefully avoiding Giac's own
+// two-bound _cdf(...) form, confirmed wrong for several families even with ordinary finite
+// bounds - is shared with the plot panel's own inline probability readout (see
+// resolveDistributionCdfPlan's own comment in distributionParams.js for the full story).
+async function evaluateOtherDistributionCdf(sentExpr) {
+  const parsed = parseDistributionCdfCall(sentExpr);
+  if (!parsed || parsed.family === 'normald') return null;
+  const { family, params, lower, upper } = parsed;
+  const famCfg = DISTRIBUTION_FAMILIES[family];
+  if (!famCfg) return null;
+
+  const plan = await resolveDistributionCdfPlan(rawEvalAsync, family, params, lower, upper);
+  // Both bounds at the family's own natural extreme - the whole distribution, probability 1 -
+  // is rare/degenerate enough as a hand-typed _cdf call that it's left to fall back to Giac's
+  // own (unlabeled) evaluation instead of a "P(Bin(10,0.5))=1" label with no relation left to
+  // show at all.
+  if (!plan || (plan.lowerDropped && plan.upperDropped)) return null;
+  const { giacExpr, lowerDropped, upperDropped } = plan;
+
+  const cdfOut = stripTrailingSemicolon(await rawEvalAsync(`evalf(${giacExpr})`));
+  if (cdfOut.startsWith('GIAC_ERROR')) {
+    return { raw: cdfOut, isError: true, text: cdfOut.slice(11).trim(), latex: null, isGraphics: false };
+  }
+
+  let displayValue = cdfOut;
+  let isExact = false;
+  const exactOut = stripTrailingSemicolon(await rawEvalAsync(`exact(${giacExpr})`));
+  if (!exactOut.startsWith('GIAC_ERROR')) {
+    const exactPart = reinsertableValue(exactOut);
+    const rational = parseExactRational(exactPart);
+    if (rational?.den === 1n) {
+      displayValue = exactPart;
+      isExact = true;
+    } else if (rational) {
+      const exactDecimal = terminatingDecimalString(rational.num, rational.den);
+      if (exactDecimal && sameNumericValue(exactDecimal, cdfOut)) {
+        displayValue = exactDecimal;
+        isExact = true;
+      }
+    }
+  }
+
+  const paramLatex = famCfg.params.map((p) => giacToLatex(params[p.key] ?? p.default));
+  if (paramLatex.some((l) => l == null)) return null;
+  const symbolLatex = distributionSymbolLatex(family, paramLatex);
+  const symbolText = distributionSymbolText(
+    family,
+    famCfg.params.map((p) => params[p.key] ?? p.default),
+  );
+  if (!symbolLatex || !symbolText) return null;
+
+  let bodyLatex, bodyText;
+  if (lowerDropped) {
+    const upperLatex = giacToLatex(upper);
+    if (upperLatex == null) return null;
+    bodyLatex = `${symbolLatex} \\le ${upperLatex}`;
+    bodyText = `${symbolText}≤${upper}`;
+  } else if (upperDropped) {
+    const lowerLatex = giacToLatex(lower);
+    if (lowerLatex == null) return null;
+    bodyLatex = `${symbolLatex} \\ge ${lowerLatex}`;
+    bodyText = `${symbolText}≥${lower}`;
+  } else {
+    const lowerLatex = giacToLatex(lower);
+    const upperLatex = giacToLatex(upper);
+    if (lowerLatex == null || upperLatex == null) return null;
+    bodyLatex = `${lowerLatex} \\le ${symbolLatex} \\le ${upperLatex}`;
+    bodyText = `${lower}≤${symbolText}≤${upper}`;
+  }
+
+  const sci = formatApproxSci(displayValue);
+  const exact = isExact && !sci?.rounded;
+  return {
+    raw: displayValue,
+    isError: false,
+    text: `P(${bodyText})${exact ? '=' : '≈'}${displayValue}`,
+    latex: `\\mathrm{P}(${bodyLatex})${exact ? '=' : '\\approx'}${sci ? sci.latex : displayValue}`,
+    isGraphics: false,
+  };
+}
+
 // Evaluate one line of Xcas input. Returns a promise for:
 //   { raw, isError, text, latex, isGraphics }
 // - raw: the string Giac returned, untouched - except a single-solution solve() result,
@@ -2043,6 +2139,13 @@ export async function evaluate(expr, definitions) {
   // regardless of the sheet's own exact/approx mode.
   const normalCdfResult = await evaluateNormalCdf(parseNormalCdfCall(sentExpr));
   if (normalCdfResult) return normalCdfResult;
+
+  // Same idea, generalized to every other distribution's _cdf() (see
+  // evaluateOtherDistributionCdf's own comment for why it never uses Giac's own two-bound
+  // form) - checked after normald_cdf's own dedicated path above so a normald_cdf call is
+  // never handled twice.
+  const otherCdfResult = await evaluateOtherDistributionCdf(sentExpr);
+  if (otherCdfResult) return otherCdfResult;
 
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
@@ -2166,7 +2269,7 @@ function bigGcd(a, b) {
 // Parses a Giac numeric output that's a plain integer, decimal, or exact fraction into an
 // exact { num, den } BigInt pair (den > 0), or null if it's anything else (irrational,
 // symbolic, an equation, a list, ...).
-function parseExactRational(s) {
+export function parseExactRational(s) {
   let m = s.match(/^(-?\d+)\/(\d+)$/);
   if (m) return { num: BigInt(m[1]), den: BigInt(m[2]) };
 
@@ -2187,7 +2290,7 @@ function parseExactRational(s) {
 // A reduced fraction's decimal expansion terminates iff its denominator's only prime
 // factors are 2 and 5 (any other prime factor forces an infinitely repeating decimal).
 // Returns the exact terminating decimal string, or null if it doesn't terminate.
-function terminatingDecimalString(num, den) {
+export function terminatingDecimalString(num, den) {
   const g = bigGcd(num, den) || 1n;
   num /= g;
   den /= g;
@@ -2330,6 +2433,10 @@ export async function evaluateApprox(expr, definitions) {
   // Same erf()-avoiding short-circuit as evaluate() above - see evaluateNormalCdf.
   const normalCdfResult = await evaluateNormalCdf(parseNormalCdfCall(normalized));
   if (normalCdfResult) return normalCdfResult;
+
+  // Same idea, generalized to every other distribution's _cdf() - see evaluateOtherDistributionCdf.
+  const otherCdfResult = await evaluateOtherDistributionCdf(normalized);
+  if (otherCdfResult) return otherCdfResult;
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown

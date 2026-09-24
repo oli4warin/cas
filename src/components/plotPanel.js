@@ -11,6 +11,7 @@ import {
   sampleDiscreteDistribution,
   resolveDistributionBounds,
   computeDistributionFitView,
+  computeDistributionProbability,
 } from '../lib/plotSample.js';
 import { DEFAULT_VIEW, makeRow, defaultDistributionParams } from '../lib/plotRows.js';
 import { collectRowParams, reconcileSliders } from '../lib/plotParams.js';
@@ -19,6 +20,10 @@ import { FormulaPreview } from './formulaPreview.js';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
 const SAMPLE_DEBOUNCE_MS = 150;
+// Opacity for a distribution row's shaded area/bars (see the 'area'/'bars' curve styles in
+// draw() below) - low enough that the grid lines and curve stroke underneath/on top still
+// read clearly through the fill.
+const DISTRIBUTION_FILL_OPACITY = 0.35;
 
 // A row's curve color: whatever the user picked manually, or - same as before that was
 // possible - the palette color for its position.
@@ -222,8 +227,9 @@ function draw(canvas, rawView, curves, aspectLocked) {
       // units wide so neighboring bars read as separate columns with a visible gap between
       // them. Every bar gets an outline in the row color; a bar whose k falls inside the
       // shaded [lower,upper] region (see resolveDistributionBounds/resample()) is additionally
-      // filled at 50% opacity - a bar chart's own rectangle already reads as "the area", so no
-      // separate fill-vs-curve pass is needed the way the continuous 'area' style below needs.
+      // filled at DISTRIBUTION_FILL_OPACITY - a bar chart's own rectangle already reads as
+      // "the area", so no separate fill-vs-curve pass is needed the way the continuous 'area'
+      // style below needs.
       const barHalfWidth = (0.4 * width) / (xmax - xmin);
       const zeroPy = toPy(0);
       ctx.strokeStyle = curve.color;
@@ -238,7 +244,7 @@ function draw(canvas, rawView, curves, aspectLocked) {
         const rectW = barHalfWidth * 2;
         const rectH = Math.abs(zeroPy - topPy);
         if (filled) {
-          ctx.fillStyle = hexToRgba(curve.color, 0.5);
+          ctx.fillStyle = hexToRgba(curve.color, DISTRIBUTION_FILL_OPACITY);
           ctx.fillRect(rectX, rectY, rectW, rectH);
         }
         ctx.strokeRect(rectX, rectY, rectW, rectH);
@@ -252,7 +258,7 @@ function draw(canvas, rawView, curves, aspectLocked) {
       // see resample()'s distribution branch) - filled *underneath* the curve stroke drawn
       // below, in separate sub-paths across any NaN gap (mirrors the stroke loop's own
       // `started` handling), so a domain-masked gap never gets bridged by a fill.
-      ctx.fillStyle = hexToRgba(curve.color, 0.5);
+      ctx.fillStyle = hexToRgba(curve.color, DISTRIBUTION_FILL_OPACITY);
       const zeroPy = toPy(0);
       let path = null;
       const closePath = () => {
@@ -330,6 +336,7 @@ function createRowView({
   let paramsWrapEl = null;
   let lowerEl = null;
   let upperEl = null;
+  let probResultEl = null;
   let paramFamilyKey = null; // which family paramEls was last built for - rebuilt only when this changes
   const paramEls = {}; // paramKey -> input
 
@@ -414,7 +421,12 @@ function createRowView({
       placeholder: 'infinity',
       oninput: (e) => onBoundChange('upper', e.target.value),
     });
-    const bounds = h('span', { class: 'plot-row__tRange' }, 'P(', lowerEl, '≤ X ≤', upperEl, ')');
+    // The probability that region actually represents - filled in once resample() has
+    // computed it for the row's current family/params/bounds (see resample()'s distribution
+    // branch and computeDistributionProbability in plotSample.js); left empty until then, and
+    // whenever that computation doesn't apply at all (an invalid expression mid-edit).
+    probResultEl = h('span', { class: 'plot-row__distProb' });
+    const bounds = h('span', { class: 'plot-row__tRange' }, 'P(', lowerEl, '≤ X ≤', upperEl, ')', probResultEl);
     return h('span', {}, familySelectEl, paramsWrapEl, bounds);
   }
 
@@ -453,6 +465,7 @@ function createRowView({
     paramsWrapEl = null;
     lowerEl = null;
     upperEl = null;
+    probResultEl = null;
 
     if (mode === 'distribution') {
       fieldsWrap.append(makeDistributionFields());
@@ -531,7 +544,7 @@ function createRowView({
     }
   }
 
-  function update(row, index, errorMessage) {
+  function update(row, index, errorMessage, probText) {
     const color = rowColor(row, index);
     if (swatch.value !== color) swatch.value = color;
     if (modeSelect.value !== row.mode) modeSelect.value = row.mode;
@@ -552,6 +565,7 @@ function createRowView({
       updateDistParams(row.family, row.params);
       if (lowerEl.value !== row.lower) lowerEl.value = row.lower;
       if (upperEl.value !== row.upper) upperEl.value = row.upper;
+      probResultEl.textContent = probText ?? '';
     }
 
     updateSliders(row.sliders ?? {});
@@ -920,7 +934,7 @@ export function PlotPanel({
         });
         rowViews.set(row.id, view);
       }
-      view.update(row, i, curves[row.id]?.error);
+      view.update(row, i, curves[row.id]?.error, curves[row.id]?.prob?.text);
       desired.push(view.root);
     });
     for (const [id, view] of rowViews) {
@@ -1062,12 +1076,18 @@ export function PlotPanel({
           : sampleContinuousDistribution(evaluateRaw, row.family, row.params, xmin, xmax, points);
         // Sequential, not Promise.all - same reason sampleScatter's two evaluateRaw calls are
         // (see its own comment in plotSample.js): the shared bridge is only ever asked to
-        // resolve one dependent step at a time here.
+        // resolve one dependent step at a time here. The probability readout (see
+        // computeDistributionProbability) is independent of the sampled points/bounds above -
+        // it re-derives what it needs from row.lower/row.upper itself - but still has to wait
+        // its turn on the same bridge.
         sample
           .then((pts) => resolveDistributionBounds(evaluateRaw, row.lower, row.upper).then((bounds) => ({ pts, bounds })))
-          .then(({ pts, bounds }) => {
+          .then(({ pts, bounds }) =>
+            computeDistributionProbability(evaluateRaw, row.family, row.params, row.lower, row.upper).then((prob) => ({ pts, bounds, prob })),
+          )
+          .then(({ pts, bounds, prob }) => {
             if (requestId !== myRequest) return;
-            curves = { ...curves, [row.id]: { points: pts, error: null, lower: bounds.lower, upper: bounds.upper } };
+            curves = { ...curves, [row.id]: { points: pts, error: null, lower: bounds.lower, upper: bounds.upper, prob } };
             renderRows();
             redraw();
           }, applyError);

@@ -3,11 +3,11 @@
 // stays the only free variable while any other name the user has already assigned
 // (`a:=2`, `f(x):=...`) resolves exactly as it would on the command line.
 
-import { normalizePowerCalls } from './giac.js';
+import { normalizePowerCalls, reinsertableValue, parseExactRational, terminatingDecimalString, sameNumericValue } from './giac.js';
 import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js';
 import { substitutePlotParams } from './plotParams.js';
 import { parseDiffEq, buildFieldComponents } from './plotDiffEq.js';
-import { distributionDomainExpr, DISTRIBUTION_FAMILIES } from './distributionParams.js';
+import { distributionDomainExpr, DISTRIBUTION_FAMILIES, resolveDistributionCdfPlan } from './distributionParams.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -434,4 +434,48 @@ export async function computeDistributionFitView(evaluateRaw, family, params, di
   const ymin = -ymax * 0.08;
 
   return { xmin, xmax, ymin, ymax };
+}
+
+// The plot panel's own inline "P(lower<=X<=upper)≈value" readout, shown right next to a
+// distribution row's own bound fields (see plotPanel.js) so the probability the shaded region
+// represents is visible without having to separately type the matching _cdf(...) call into the
+// calculator. Shares its actual computation - carefully avoiding Giac's own two-bound
+// _cdf(...) form, confirmed wrong for several families even with ordinary finite bounds - with
+// giac.js's own _cdf output formatting (see resolveDistributionCdfPlan's own comment in
+// distributionParams.js for the full story).
+//
+// Unlike that calculator-facing formatting, both bounds at the family's own natural extreme
+// (the default state of a freshly added row - see lib/plotRows.js's makeRow) is shown here as
+// the trivial "=1" it actually is, rather than left unlabeled - resolveDistributionCdfPlan
+// reports that case back via giacExpr:"1" specifically so this can do that. Returns null when
+// the family is unknown or a bound doesn't evalf() to a plain real (an invalid expression
+// mid-edit, say) - the caller just leaves the previous readout in place then.
+export async function computeDistributionProbability(evaluateRaw, family, params, lower, upper) {
+  const plan = await resolveDistributionCdfPlan(evaluateRaw, family, params, lower, upper);
+  if (!plan) return null;
+  const { giacExpr } = plan;
+
+  const valueOut = await evaluateRaw(`evalf(${giacExpr})`);
+  if (valueOut.startsWith('GIAC_ERROR')) return null;
+  const value = valueOut.trim();
+
+  let displayValue = value;
+  let isExact = false;
+  const exactOut = await evaluateRaw(`exact(${giacExpr})`);
+  if (!exactOut.startsWith('GIAC_ERROR')) {
+    const exactPart = reinsertableValue(exactOut);
+    const rational = parseExactRational(exactPart);
+    if (rational?.den === 1n) {
+      displayValue = exactPart;
+      isExact = true;
+    } else if (rational) {
+      const exactDecimal = terminatingDecimalString(rational.num, rational.den);
+      if (exactDecimal && sameNumericValue(exactDecimal, value)) {
+        displayValue = exactDecimal;
+        isExact = true;
+      }
+    }
+  }
+
+  return { text: `${isExact ? '=' : '≈'}${displayValue}` };
 }
