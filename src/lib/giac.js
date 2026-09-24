@@ -1122,6 +1122,32 @@ function isIndefiniteIntegral(sentExpr) {
   return args.length === 1 || args.length === 2;
 }
 
+// Recognizes a *definite* integral - integrate(expr,var,lower,upper), or its "int" alias, the
+// 4-argument form isIndefiniteIntegral above explicitly excludes - and returns
+// {expr, variable, lower, upper}, or null if `rawInput` isn't shaped like one. Used by
+// lib/plottable.js to offer a "plot" button on an entry like "int(x*sin(x),x,0,1)" that shows
+// the integrand's own curve with the area between lower/upper shaded (see the plot panel's
+// 'integral' row mode), the same way a `_cdf` call's own input is offered as its distribution
+// with a region shaded (see parseDistributionCdfCall). Runs on the entry's own hand-typed input
+// text, not a Giac-normalized sentExpr - so unlike isIndefiniteIntegral above (which only ever
+// sees sentExpr after wrapBareEquation/normalizeAliasCommands have already run) this has to
+// recognize "int" itself rather than assume it's already been rewritten to "integrate", but
+// otherwise needs no other normalization since it never evaluates or rewrites the arguments,
+// only splits the call apart into them verbatim.
+export function parseDefiniteIntegralCall(rawInput) {
+  const s = rawInput.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
+  if (!nameMatch || !body.endsWith(')') || !INTEGRATE_NAME_RE.test(nameMatch[1])) return null;
+  const openIdx = nameMatch[0].length - 1;
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',');
+  if (args.length !== 4) return null;
+  const variable = args[1].trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable)) return null;
+  return { expr: args[0].trim(), variable, lower: args[2].trim(), upper: args[3].trim() };
+}
+
 // Appends "+C" to a rendered LaTeX antiderivative - "\\int ... dx" style spacing isn't in play
 // here (this runs on the *result*, not the integral notation itself), so a plain textual
 // append is enough; skipped when there's no LaTeX to append to (e.g. fetchLatex failed).

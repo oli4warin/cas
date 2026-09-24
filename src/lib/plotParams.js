@@ -27,6 +27,11 @@ import { collectFreeVariables, expandKnownFunctionCalls } from './giac.js';
 // fixed set (x/y, or z for complexSystem) outright (a plain, user-facing error rather than a
 // slider offer) - see its own module comment for why a "system of equations" is meant to stay
 // exactly that.
+// integral gets sliders exactly like function does - its 'expr' field is the same "curve in x"
+// shape, just additionally shaded between its lower/upper bounds (see the plot panel's
+// 'integral' row mode), so a named parameter in the integrand (e.g. the "a" in "a*x^2") should
+// offer a slider the same way it would in an ordinary function row rather than erroring as an
+// undefined name.
 const BOUND_VARS = {
   function: ['x'],
   parametric: ['t'],
@@ -34,6 +39,7 @@ const BOUND_VARS = {
   scatter: [],
   diffeq: [],
   distribution: [],
+  integral: ['x'],
   system: ['x', 'y'],
   complexSystem: ['z'],
 };
@@ -44,6 +50,7 @@ const PARAM_FIELDS = {
   scatter: [],
   diffeq: [],
   distribution: [],
+  integral: ['expr'],
   system: [],
   complexSystem: [],
 };

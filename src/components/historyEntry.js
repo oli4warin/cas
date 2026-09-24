@@ -86,7 +86,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     if (!spec) btn.style.display = 'none';
     return btn;
   }
-  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function/distribution/regression/system');
+  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function/distribution/integral/regression/system');
   const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result');
 
   const inputRow = h(
@@ -134,11 +134,16 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   // carries that label forward if this entry has to be rebuilt from scratch (e.g. an earlier
   // entry's deletion renumbers everything after it - see deleteEntry/app.js), so re-rendering
   // doesn't forget a save that already happened.
+  // The "entry__save--saved" class is what a print stylesheet keys off to keep only *this*
+  // state of the button on the printed page (see the @media print rule in app.css) - "save"
+  // and every "plot" button are meaningless once they're no longer clickable, but "saved to x"
+  // is a fact about the entry worth keeping, so it stays visible as a plain little box there
+  // instead of disappearing along with them.
   const saveBtn = h(
     'button',
     {
       type: 'button',
-      class: 'entry__save',
+      class: `entry__save${entry.savedAs ? ' entry__save--saved' : ''}`,
       'aria-label': 'Save this result',
       title: 'Save this result (s)',
       onclick: (e) => {
@@ -153,6 +158,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   function setSavedLabel(label) {
     entry.savedAs = label;
     saveBtn.textContent = `saved to ${label}`;
+    saveBtn.classList.add('entry__save--saved');
   }
 
   const root = h('div', { class: `entry${entry.isError ? ' entry--error' : ''}` }, deleteBtn, saveBtn, inputRow, outputRow);

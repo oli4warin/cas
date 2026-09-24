@@ -31,6 +31,11 @@ const DISTRIBUTION_FILL_OPACITY = 0.35;
 // stack several inequalities' fills on top of each other (deliberately: their overlap reading
 // darker is how the combined feasible region shows through).
 const SYSTEM_FILL_OPACITY = 0.3;
+// Opacity for a definite integral row's shaded area under its curve (see the 'integral' curve
+// style below) - a separate constant from DISTRIBUTION_FILL_OPACITY even though a distribution
+// row's own shaded region is conceptually the same "area under a curve" shape, since the two
+// are tuned independently and asking for one shouldn't silently move the other.
+const INTEGRAL_FILL_OPACITY = 0.3;
 
 // A row's curve color: whatever the user picked manually, or - same as before that was
 // possible - the palette color for its position.
@@ -351,10 +356,14 @@ function draw(canvas, rawView, curves, aspectLocked) {
     if (curve.style === 'area' && curve.fillFrom != null && curve.fillTo != null) {
       // The shaded region under a continuous distribution's density, for x in
       // [fillFrom,fillTo] (already clamped to the drawn range and to the family's own support -
-      // see resample()'s distribution branch) - filled *underneath* the curve stroke drawn
-      // below, in separate sub-paths across any NaN gap (mirrors the stroke loop's own
-      // `started` handling), so a domain-masked gap never gets bridged by a fill.
-      ctx.fillStyle = hexToRgba(curve.color, DISTRIBUTION_FILL_OPACITY);
+      // see resample()'s distribution branch), or under a definite integral row's own integrand
+      // between its lower/upper bounds (see resample()'s 'integral' branch) - filled
+      // *underneath* the curve stroke drawn below, in separate sub-paths across any NaN gap
+      // (mirrors the stroke loop's own `started` handling), so a domain-masked gap never gets
+      // bridged by a fill. `curve.fillOpacity` lets a curve ask for its own opacity (an
+      // 'integral' row's INTEGRAL_FILL_OPACITY) rather than always DISTRIBUTION_FILL_OPACITY -
+      // see curveList() below.
+      ctx.fillStyle = hexToRgba(curve.color, curve.fillOpacity ?? DISTRIBUTION_FILL_OPACITY);
       const zeroPy = toPy(0);
       let path = null;
       const closePath = () => {
@@ -451,6 +460,7 @@ function createRowView({
     h('option', { value: 'scatter' }, 'scatter (x,y) data'),
     h('option', { value: 'diffeq' }, 'differential equation'),
     h('option', { value: 'distribution' }, 'probability distribution'),
+    h('option', { value: 'integral' }, 'definite integral'),
     h('option', { value: 'system' }, 'system of equations (x,y)'),
     h('option', { value: 'complexSystem' }, 'complex equations (z)'),
   );
@@ -556,6 +566,30 @@ function createRowView({
     return h('span', {}, familySelectEl, paramsWrapEl, bounds);
   }
 
+  // A definite integral row's fields: the integrand (the same 'expr' field name/preview a
+  // plain function row uses, so fieldOrder's default ['expr'] and update()'s generic field-sync
+  // loop both already handle it with no special-casing) plus lower/upper bound inputs - reusing
+  // the same lowerEl/upperEl variables and onBoundChange wiring makeDistributionFields uses
+  // above, just without a distribution's family <select>, per-family params, or probability
+  // readout, none of which apply to a plain area-under-a-curve shading.
+  function makeIntegralFields() {
+    const exprField = makeField('expr', 'f(x), e.g. x*sin(x)', 'f(x)');
+    lowerEl = h('input', {
+      class: 'plot-row__tInput',
+      type: 'text',
+      placeholder: '0',
+      oninput: (e) => onBoundChange('lower', e.target.value),
+    });
+    upperEl = h('input', {
+      class: 'plot-row__tInput',
+      type: 'text',
+      placeholder: '1',
+      oninput: (e) => onBoundChange('upper', e.target.value),
+    });
+    const bounds = h('span', { class: 'plot-row__tRange' }, 'from', lowerEl, 'to', upperEl);
+    return h('span', {}, exprField, bounds);
+  }
+
   // Rebuilds the per-family param inputs only when `family` itself changed (same
   // rebuild-only-on-key-change idea as updateSliders below) - a value tick (typing into an
   // already-built field) never tears the inputs down and loses focus/caret position.
@@ -595,6 +629,8 @@ function createRowView({
 
     if (mode === 'distribution') {
       fieldsWrap.append(makeDistributionFields());
+    } else if (mode === 'integral') {
+      fieldsWrap.append(makeIntegralFields());
     } else if (mode === 'parametric') {
       fieldsWrap.append(makeField('exprX', 'x(t), e.g. cos(t)', 'x(t)'), makeField('exprY', 'y(t), e.g. sin(t)', 'y(t)'), makeTRange());
     } else if (mode === 'complex') {
@@ -707,10 +743,13 @@ function createRowView({
     if (familySelectEl) {
       if (familySelectEl.value !== row.family) familySelectEl.value = row.family;
       updateDistParams(row.family, row.params);
-      if (lowerEl.value !== row.lower) lowerEl.value = row.lower;
-      if (upperEl.value !== row.upper) upperEl.value = row.upper;
       probResultEl.textContent = probText ?? '';
     }
+    // Shared by 'distribution' and 'integral' rows (see makeDistributionFields/
+    // makeIntegralFields above) - kept outside the familySelectEl block above since an
+    // 'integral' row has bound inputs but no family <select>.
+    if (lowerEl && lowerEl.value !== row.lower) lowerEl.value = row.lower;
+    if (upperEl && upperEl.value !== row.upper) upperEl.value = row.upper;
 
     updateSliders(row.sliders ?? {});
 
@@ -1117,6 +1156,7 @@ export function PlotPanel({
   function curveList() {
     return rows.map((row, i) => {
       const isDistribution = row.mode === 'distribution';
+      const isIntegral = row.mode === 'integral';
       const discrete = isDistribution && DISTRIBUTION_FAMILIES[row.family]?.discrete;
       const stored = curves[row.id];
       if (row.mode === 'system' || row.mode === 'complexSystem') {
@@ -1135,9 +1175,10 @@ export function PlotPanel({
         points: discrete
           ? stored?.points?.map((p) => ({ ...p, filled: p.x >= stored.lower && p.x <= stored.upper }))
           : stored?.points,
-        style: row.mode === 'scatter' ? 'points' : row.mode === 'diffeq' ? 'field' : discrete ? 'bars' : isDistribution ? 'area' : 'line',
-        fillFrom: isDistribution && !discrete ? stored?.lower : undefined,
-        fillTo: isDistribution && !discrete ? stored?.upper : undefined,
+        style: row.mode === 'scatter' ? 'points' : row.mode === 'diffeq' ? 'field' : discrete ? 'bars' : isDistribution || isIntegral ? 'area' : 'line',
+        fillFrom: (isDistribution && !discrete) || isIntegral ? stored?.lower : undefined,
+        fillTo: (isDistribution && !discrete) || isIntegral ? stored?.upper : undefined,
+        fillOpacity: isIntegral ? INTEGRAL_FILL_OPACITY : undefined,
       };
     });
   }
@@ -1262,6 +1303,24 @@ export function PlotPanel({
           .then(({ pts, bounds, prob }) => {
             if (requestId !== myRequest) return;
             curves = { ...curves, [row.id]: { points: pts, error: null, lower: bounds.lower, upper: bounds.upper, prob } };
+            renderRows();
+            redraw();
+          }, applyError);
+      } else if (row.mode === 'integral') {
+        if (!row.expr.trim()) {
+          delete curves[row.id];
+          continue;
+        }
+        // Same shape as the 'distribution' branch above - sample the integrand over the whole
+        // visible range like an ordinary function, then separately resolve its lower/upper
+        // bounds (shared with a distribution row's own resolveDistributionBounds, since a plain
+        // Giac expression bound like "pi" or "sqrt(2)" needs resolving to a plain number either
+        // way) so curveList() below knows which slice of the sampled curve to shade.
+        sampleFunction(evaluateRaw, row.expr, xmin, xmax, points, row.sliders)
+          .then((pts) => resolveDistributionBounds(evaluateRaw, row.lower, row.upper).then((bounds) => ({ pts, bounds })))
+          .then(({ pts, bounds }) => {
+            if (requestId !== myRequest) return;
+            curves = { ...curves, [row.id]: { points: pts, error: null, lower: bounds.lower, upper: bounds.upper } };
             renderRows();
             redraw();
           }, applyError);

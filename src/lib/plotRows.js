@@ -28,7 +28,7 @@ let nextRowId = 1;
 export function makeRow() {
   return {
     id: nextRowId++,
-    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq' | 'distribution' | 'system' | 'complexSystem'
+    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq' | 'distribution' | 'integral' | 'system' | 'complexSystem'
     expr: '',
     exprX: '',
     exprY: '',

@@ -1539,6 +1539,7 @@ export function mountApp(root) {
     function: (r) => !r.expr.trim(),
     diffeq: (r) => !r.exprDE.trim(),
     distribution: () => false,
+    integral: (r) => !r.expr.trim(),
     scatter: (r) => !r.exprX.trim() && !r.exprY.trim(),
     system: (r) => !r.exprSystem.trim(),
     complexSystem: (r) => !r.exprComplexSystem.trim(),
@@ -1563,7 +1564,15 @@ export function mountApp(root) {
 
     if (state.plotOpen) {
       plotPanelInstance?.setRows(nextRows);
-      state.mobileView = 'calculator';
+      // 'plot' rather than 'calculator': on a narrow/mobile layout the two are mutually
+      // exclusive (see the [data-mobile-view] rules in app.css), so leaving this on
+      // 'calculator' hid the very plot just added, forcing the tab to be tapped again by
+      // hand. On a wide/desktop layout this has no visible effect either way - the side
+      // column is always shown there regardless of mobileView - and input.focus() just below
+      // still lands on the CAS input as before (on mobile the input's own column is now the
+      // hidden one, so a focus call on it is a no-op there rather than popping the keyboard
+      // up over the plot).
+      state.mobileView = 'plot';
       renderLayout();
       input.focus();
     } else {
@@ -1571,7 +1580,8 @@ export function mountApp(root) {
       // mountPlotPanel() above schedules its own focus onto a fresh input row a tick from
       // now (see focusOnMount in plotPanel.js) - queuing this after it, rather than calling
       // it right here, is what lets it win and land focus back on the CAS input as intended.
-      state.mobileView = 'calculator';
+      // openPlot() above already put mobileView on 'plot' - left as-is here for the same
+      // mobile-visibility reason as the branch above.
       renderLayout();
       setTimeout(() => input.focus(), 0);
     }

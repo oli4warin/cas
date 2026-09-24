@@ -990,8 +990,18 @@
   .entry__copied,
   .entry__delete,
   .entry__rowPlot,
-  .entry__save {
+  .entry__save:not(.entry__save--saved) {
     display: none;
+  }
+
+  /* Unlike a plain "save"/"plot" button (meaningless once it's no longer clickable, so hidden
+     above), "saved to x" is a fact about the entry worth keeping on the page - shown as the
+     same little box it already is on screen, just no longer a live control. */
+  .entry__save--saved {
+    cursor: default;
+    color: #000 !important;
+    border-color: #999;
+    background: none;
   }
 }
 

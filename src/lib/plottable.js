@@ -8,12 +8,12 @@
 // whichever half is selected should plot exactly that one, never the other.
 
 import { parseDefinition } from './definitions.js';
-import { isPlottableInX, reinsertableValue, parseRegressionCall } from './giac.js';
+import { isPlottableInX, reinsertableValue, parseRegressionCall, parseDefiniteIntegralCall } from './giac.js';
 import { parseDiffEq } from './plotDiffEq.js';
 import { parseDistributionCdfCall } from './distributionParams.js';
 import { parseSystemLines, parseComplexSystemLines } from './plotSystem.js';
 
-// Six shapes count as plottable from an entry's *input*: a function this session just
+// Seven shapes count as plottable from an entry's *input*: a function this session just
 // defined with exactly one parameter (f(x):=..., or even f(t):=... - calling it back as
 // "f(x)" always comes out as an expression in x regardless of what the definition itself calls
 // its own parameter, since Giac substitutes whatever's actually passed), a differential
@@ -27,7 +27,13 @@ import { parseSystemLines, parseComplexSystemLines } from './plotSystem.js';
 // (xExpr,yExpr) data itself as a scatter plot, plus the already-fitted curve this same entry's
 // output computed (entry.raw - the plain formula, since evaluateRegression in giac.js never
 // wraps it as "y=...") as an ordinary function - so one click/keypress shows the fit next to
-// the data it was fit to - or a system of one or more equations/inequalities in x and y (see
+// the data it was fit to - or a *definite* integral, integrate(expr,x,a,b)/int(expr,x,a,b) (see
+// lib/giac.js's parseDefiniteIntegralCall - the 4-argument form only; an indefinite integral has
+// no bounds to shade and no antiderivative curve worth plotting either), offered as that
+// integrand's own curve with the area between a and b shaded (see the plot panel's 'integral'
+// row mode), the same "show what the command actually computed" idea as a `_cdf` call's own
+// distribution-with-region-shaded just below - or a system of one or more equations/inequalities
+// in x and y (see
 // lib/plotSystem.js's parseSystemLines - the same "one per line, x/y only" shape the plot
 // panel's own 'system' row takes), offered as that whole system verbatim, line breaks and all
 // (the 'system' row's sampling re-parses it the exact same way, and traces/shades/solves it -
@@ -61,6 +67,14 @@ export function plottableInputForEntry(entry, definitions = new Map()) {
       { mode: 'scatter', patch: { exprX: regression.xExpr, exprY: regression.yExpr } },
       { mode: 'function', patch: { expr: reinsertableValue(entry.raw ?? '') } },
     ];
+  }
+
+  // Only offered when the integration variable is "x" - the plot panel's own function-shaped
+  // rows (this 'integral' row included) are always graphed against the x-axis, so an integral
+  // over some other variable (e.g. "integrate(t^2,t,0,1)") has no curve to show here.
+  const definiteIntegral = parseDefiniteIntegralCall(entry.input);
+  if (definiteIntegral && definiteIntegral.variable === 'x') {
+    return { mode: 'integral', patch: { expr: definiteIntegral.expr, lower: definiteIntegral.lower, upper: definiteIntegral.upper } };
   }
 
   for (const rawLine of entry.input.split('\n')) {
