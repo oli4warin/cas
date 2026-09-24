@@ -257,6 +257,7 @@
 .empty-hint li {
   font-family: var(--mono);
   font-size: 14px;
+  white-space: pre-wrap;
   cursor: pointer;
   padding: 6px 12px;
   border-radius: 5px;

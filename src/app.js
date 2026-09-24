@@ -231,7 +231,14 @@ const TOOLBAR_GROUPS = [
   },
 ];
 
-const EXAMPLES = ['integrate(sin(x)*x,x)', 'solve(x^2-5*x+6=0,x)', 'factor(x^3-1)', 'limit(sin(x)/x,x,0)'];
+const EXAMPLES = [
+  'x^2-5*x+6=0',
+  "y'=y",
+  'x+y=5\ny-x=3',
+  'regression',
+  'binomial_cdf',
+  'csolve(z^2+1=0,z)',
+];
 
 // Names offered by input tab completion: the full Giac/Xcas command set (see
 // lib/xcasCommands.js), not just the handful curated in the functions menu.
