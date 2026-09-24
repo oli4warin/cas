@@ -838,6 +838,34 @@ function rewriteExplicitSolveCallPipe(body) {
   return `${funcName}(${newArgs.join(',')})`;
 }
 
+// fMax/fMin's own second argument doubles as its domain - "fMax(expr,x)" searches all reals,
+// "fMax(expr,x=a..b)" restricts the search to [a,b] - and Giac's own "|" substitution operator
+// already rewrites a restriction trailing a *complete* fMax(...)/fMin(...) call into exactly
+// that form natively: "fMax(x-x^3,x)|x>0" evaluates straight to "seq[1/3*sqrt(3)]", condition
+// and all (compound conditions like "x>0 and x<0.9" work too). That's unlike solve() and
+// friends (see rewriteExplicitSolveCallPipe above), which swallow the same trailing "|" into no
+// solutions at all. So this restriction is left completely alone here, before
+// resolvePipeRestriction below gets a chance at it - resolvePipeRestriction has no notion that
+// "fMax(x-x^3,x)" is already a complete call rather than a bare expression, and would instead
+// fold the condition in as "fMax(x-x^3,x) and x>0" for solve() to work out, which comes back
+// empty (fMax's result and'ed with a condition isn't something solve() can filter with, and it
+// swallows the resulting error into "no solutions" the same way it does for its own botched "|"
+// handling elsewhere). Restricted to the "call)|condition" spelling - unlike a trailing
+// restriction, one embedded in fMax/fMin's own first argument ("fMax(x-x^3|x>0,x)") is *not*
+// handled natively by Giac (it applies the condition to the expression, not the search domain,
+// and silently gives the unrestricted answer back), so that shape is left for
+// resolvePipeRestriction's usual best-effort handling below same as any other command.
+const FMAX_FMIN_COMMANDS = new Set(['fMax', 'fMin']);
+
+function isCompleteFMaxFMinCallWithTrailingPipe(body) {
+  const head = CALL_HEAD_RE.exec(body);
+  if (!head || !FMAX_FMIN_COMMANDS.has(head[1])) return false;
+  const openIdx = head[0].length - 1;
+  const close = findMatchingParen(body, openIdx);
+  if (close === -1 || close === body.length - 1) return false;
+  return body.slice(close + 1).trimStart()[0] === '|';
+}
+
 // A line that's just one or more equations and no command at all - "x^2-3=0", or a system
 // as "x+y=5 and y-x=3" or "[x+y=5,y-x=3]" - almost always means "solve this", so wrap it the
 // way a user reaching for the `solve` button (see EXPRESSION_BUTTONS in app.js) would. The
@@ -881,6 +909,11 @@ export function wrapBareEquation(expr, definitions = new Map()) {
   const explicitCallRewrite = rewriteExplicitSolveCallPipe(body);
   if (explicitCallRewrite === false) return expr;
   if (explicitCallRewrite != null) return hasSemi ? `${explicitCallRewrite};` : explicitCallRewrite;
+
+  // fMax/fMin already handle a trailing "|" restriction natively - see
+  // isCompleteFMaxFMinCallWithTrailingPipe above - so it's left untouched rather than run
+  // through resolvePipeRestriction's usual (and here, wrong) "and"-folding below.
+  if (isCompleteFMaxFMinCallWithTrailingPipe(body)) return expr;
 
   // A top-level "|" is a restriction on the bare equation/system before it - either a plain
   // parameter pin ("a*x+b=1|a=1 and b=2") substituted directly in, or a genuine filter
@@ -1297,6 +1330,102 @@ function formatSolveResult(raw, varNames) {
   }
 
   return null;
+}
+
+// Recognizes a fMax(...)/fMin(...) call and returns the variable it searched over, or null if
+// `sentExpr` isn't shaped like one that can be labeled - mirrors parseSolveVarList above, but
+// fMax/fMin only ever take one variable, either bare ("fMax(x-x^3,x)") or as its own domain
+// restriction ("fMax(x-x^3,x=0..inf)" - see wrapBareEquation's own comment on that shape, and
+// isCompleteFMaxFMinCallWithTrailingPipe for why a trailing "|condition" left after the call's
+// closing paren doesn't change which variable this is - it's stripped here the same way, purely
+// to still find the call underneath it).
+function parseFMaxFMinVarName(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
+  if (!nameMatch || !FMAX_FMIN_COMMANDS.has(nameMatch[1])) return null;
+  const openIdx = nameMatch[0].length - 1;
+  const close = findMatchingParen(body, openIdx);
+  if (close === -1) return null;
+  const trailing = body.slice(close + 1).trim();
+  if (trailing !== '' && trailing[0] !== '|') return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, close), ',');
+  if (args.length !== 2) return null;
+  const varArg = args[1].trim();
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(varArg)) return varArg;
+  const rangeMatch = varArg.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+  return rangeMatch ? rangeMatch[1] : null;
+}
+
+// fMax/fMin hand back their result(s) as a "seq" rather than solve()'s own list[[...]] shape -
+// a single result comes wrapped as "seq[<value>]", but Giac quirkily prints more than one
+// completely unwrapped, as a bare top-level comma list ("<v1>,<v2>,...", no brackets at all).
+// Reshaped here into the same one-tuple-per-solution shape parseSolveTuples already produces
+// (each tuple a single-value array, since fMax/fMin are always single-variable), so the rest of
+// the solve() labeling/rendering machinery (labelSolveTuples, buildSaveAssignment,
+// renderGatheredLatex, formatSolveValueFragment) can be reused as-is. Returns null for an
+// empty/unparseable result, or one where the search found no actual point (unbounded, "undef")
+// - Giac represents "no maximum/minimum exists" as a bare "+infinity"/"-infinity"/"undef"
+// value, which isn't a point to label "x=" - so this is left unlabeled, falling through to the
+// generic rendering below, same as it was before this labeling existed.
+function parseFMaxFMinTuples(raw) {
+  const inner = raw.startsWith('seq[') && raw.endsWith(']') && findMatchingBracket(raw, 3) === raw.length - 1 ? raw.slice(4, -1) : raw;
+  if (!inner.trim()) return null;
+  const values = splitTopLevel(inner, ',').map((v) => normalizeSolutionValue(v.trim()));
+  if (values.some((v) => /^[+-]?(infinity|undef)$/i.test(v))) return null;
+  return values.map((v) => [v]);
+}
+
+// Builds the {text, latex, raw, saveExpr} quadruple for a fMax()/fMin() result once it's known
+// which variable it searched over (see parseFMaxFMinVarName) - mirrors formatSolveResult, e.g.
+// "x=1/3*sqrt(3)" rather than the bare "seq[1/3*sqrt(3)]" Giac itself returns, with each of
+// several solutions subscripted the same way solve()'s are (see labelSolveTuples). `raw` is
+// left as just the bare value(s) - never the "x=" label - so copying the result (see
+// historyEntry.js) reinserts just the value, same as solve()'s own single-solution case.
+function formatFMaxFMinResult(raw, varName) {
+  if (!varName) return null;
+  const tuples = parseFMaxFMinTuples(raw);
+  if (!tuples) return null;
+  const varNames = [varName];
+  const clauses = labelSolveTuples(tuples, varNames);
+  const reinsertRaw = tuples.length === 1 ? tuples[0][0] : `list[${tuples.map((t) => t[0]).join(',')}]`;
+  return {
+    text: clauses.join('\n'),
+    latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
+    raw: reinsertRaw,
+    saveExpr: buildSaveAssignment(tuples, varNames),
+  };
+}
+
+// evaluateApprox()'s counterpart to formatFMaxFMinResult - mirrors formatSolveResultApprox,
+// pairing fMax/fMin's un-evalf'd and evalf'd results value-for-value (see
+// formatSolveValueFragment) so each solution is labeled "=" or "≈" on its own. Returns null
+// (meaning: caller falls back to formatFMaxFMinResult(approxRaw, varName), the plain "="
+// labeling) whenever `varName` is null or the two raw strings don't pair up value-for-value.
+function formatFMaxFMinResultApprox(exactRaw, approxRaw, varName) {
+  if (!varName) return null;
+  const exactTuples = parseFMaxFMinTuples(exactRaw);
+  const approxTuples = parseFMaxFMinTuples(approxRaw);
+  if (!exactTuples || !approxTuples || exactTuples.length !== approxTuples.length) return null;
+
+  const textClauses = [];
+  const latexClauses = [];
+  const reinsertTuples = [];
+  for (let i = 0; i < exactTuples.length; i++) {
+    const suffix = exactTuples.length > 1 ? `_${i + 1}` : '';
+    const fragment = formatSolveValueFragment(`${varName}${suffix}`, exactTuples[i][0], approxTuples[i][0]);
+    textClauses.push(fragment.text);
+    latexClauses.push(fragment.latex);
+    reinsertTuples.push([fragment.value]);
+  }
+
+  const reinsertRaw = reinsertTuples.length === 1 ? reinsertTuples[0][0] : `list[${reinsertTuples.map((t) => t[0]).join(',')}]`;
+  return {
+    text: textClauses.join('\n'),
+    latex: latexClauses.length === 1 ? latexClauses[0] : latexClauses.every(Boolean) ? `\\begin{gathered}${latexClauses.join('\\\\')}\\end{gathered}` : null,
+    raw: reinsertRaw,
+    saveExpr: buildSaveAssignment(reinsertTuples, [varName]),
+  };
 }
 
 // Recognizes a desolve(...) call and returns the name of the unknown function it solves for,
@@ -2344,6 +2473,23 @@ export async function evaluate(expr, definitions) {
     return { raw: desolved.raw, isError: false, text: desolved.text, latex: desolved.latex, isGraphics: false };
   }
 
+  // fMax()/fMin()'s own "seq[...]"/bare comma list doesn't say which value is which variable
+  // either - relabel it to "x=1/3*sqrt(3)" the same way solve()'s own results are (see
+  // formatFMaxFMinResult), whenever `sentExpr` was a fMax()/fMin() call with a recognizable
+  // variable argument. `raw` is left as just the bare value(s), so copying the result reinserts
+  // just the value, not the "x=" label.
+  const fMaxFMinResult = formatFMaxFMinResult(out, parseFMaxFMinVarName(sentExpr));
+  if (fMaxFMinResult) {
+    return {
+      raw: fMaxFMinResult.raw,
+      isError: false,
+      text: fMaxFMinResult.text,
+      latex: fMaxFMinResult.latex,
+      isGraphics: false,
+      saveExpr: fMaxFMinResult.saveExpr,
+    };
+  }
+
   const simplifiedOut = reorderConstantRadicalSum(await applyAutosimplify(out));
   // `raw` stays pi-based (see the tailMatch branch above for why); only text/latex show the
   // tau-converted form.
@@ -2598,6 +2744,9 @@ export async function evaluateApprox(expr, definitions) {
   // for - see the matching comment in evaluate() above (same "<func>=<solution>" labeling,
   // bare `raw`, applies below).
   const desolveFuncName = parseDesolveFuncName(normalized);
+  // fMax()/fMin()'s own result doesn't say which variable it searched over either - see the
+  // matching comment in evaluate() above (same "x=<value>" labeling, bare `raw`, applies below).
+  const fMaxFMinVarName = parseFMaxFMinVarName(normalized);
 
   // Anything else (an equation, list, matrix, complex number, ...) doesn't get Giac's
   // automatic "=decimal" tail, so approximate it explicitly.
@@ -2611,6 +2760,17 @@ export async function evaluateApprox(expr, definitions) {
     const desolvedExact = formatDesolveResult(out, desolveFuncName);
     if (desolvedExact) {
       return { raw: desolvedExact.raw, isError: false, text: desolvedExact.text, latex: desolvedExact.latex, isGraphics: false };
+    }
+    const fMaxFMinExact = formatFMaxFMinResult(out, fMaxFMinVarName);
+    if (fMaxFMinExact) {
+      return {
+        raw: fMaxFMinExact.raw,
+        isError: false,
+        text: fMaxFMinExact.text,
+        latex: fMaxFMinExact.latex,
+        isGraphics: false,
+        saveExpr: fMaxFMinExact.saveExpr,
+      };
     }
     const outDisplay = piToTau(out);
     const latexOut = await fetchLatex(outDisplay);
@@ -2630,6 +2790,18 @@ export async function evaluateApprox(expr, definitions) {
   const desolvedApprox = formatDesolveResult(approxOut, desolveFuncName);
   if (desolvedApprox) {
     return { raw: desolvedApprox.raw, isError: false, text: desolvedApprox.text, latex: desolvedApprox.latex, isGraphics: false };
+  }
+
+  const fMaxFMinApprox = formatFMaxFMinResultApprox(out, approxOut, fMaxFMinVarName) || formatFMaxFMinResult(approxOut, fMaxFMinVarName);
+  if (fMaxFMinApprox) {
+    return {
+      raw: fMaxFMinApprox.raw,
+      isError: false,
+      text: fMaxFMinApprox.text,
+      latex: fMaxFMinApprox.latex,
+      isGraphics: false,
+      saveExpr: fMaxFMinApprox.saveExpr,
+    };
   }
 
   // A bare number is handled without a Giac round-trip - formatApproxSci already has enough

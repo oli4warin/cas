@@ -233,11 +233,15 @@ const TOOLBAR_GROUPS = [
 
 const EXAMPLES = [
   'x^2-5*x+6=0',
-  "y'=y",
   'x+y=5\ny-x=3',
-  'regression',
-  'binomial_cdf',
+	'x^2-2=0 | x>0',
+	'int(x*sin(x),x,0,1)',
+	'diff(x*sin(x),x)',
+	'fMax(x-x^3,x) | x>0',
+  "y'=y",
   'csolve(z^2+1=0,z)',
+  'binomial_cdf',
+  'regression',
 ];
 
 // Names offered by input tab completion: the full Giac/Xcas command set (see
