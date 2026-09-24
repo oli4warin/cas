@@ -686,7 +686,17 @@ export function mountApp(root) {
       historyList.appendChild(wrapper);
       entryViews.push(view);
     }
-    state.navPos = -1;
+    // Select the entry now sitting where the deleted one's own predecessor was (still at the
+    // same idx afterward - only entries *after* the deleted one shift down) - its output, or
+    // input for an error entry with none (see buildHistorySteps' own convention) - rather than
+    // deselecting entirely, so repeated Backspace keeps deleting entries one after another
+    // without having to re-select each time. Nothing above (the oldest entry was the one just
+    // deleted) falls back to deselected, same as before.
+    const aboveIdx = idx - 1;
+    state.navPos =
+      aboveIdx >= 0
+        ? steps().findIndex((s) => s.idx === aboveIdx && s.part === (state.history[aboveIdx].isError ? 'input' : 'output'))
+        : -1;
     renderHistoryEmptyState();
     renderLayout();
     updateSelection();
@@ -1509,20 +1519,31 @@ export function mountApp(root) {
   // blank row of a *different* mode is left alone, since e.g. a blank function row isn't a
   // valid place to drop a differential equation's text. 'distribution' never reuses a blank
   // row - unlike a single text field, "blank" isn't well-defined for a family+params row, so a
-  // fresh one is always appended.
+  // fresh one is always appended. If no same-mode blank row exists, a still-pristine default
+  // row (fresh from makeRow(), i.e. mode 'function' with nothing typed in) is repurposed
+  // instead of appending - this is what a freshly opened/emptied panel always has exactly one
+  // of, so the very first system/complexSystem/diffeq/distribution/scatter plot converts it in
+  // place rather than leaving it behind as a stray empty entry ahead of the real one.
   const PLOT_SPEC_BLANK = {
     function: (r) => !r.expr.trim(),
     diffeq: (r) => !r.exprDE.trim(),
     distribution: () => false,
     scatter: (r) => !r.exprX.trim() && !r.exprY.trim(),
     system: (r) => !r.exprSystem.trim(),
+    complexSystem: (r) => !r.exprComplexSystem.trim(),
   };
   function applyPlotSpec(rows, { mode, patch }) {
     const isBlank = PLOT_SPEC_BLANK[mode];
-    const blankIdx = rows.findIndex((r) => r.mode === mode && isBlank(r));
-    return blankIdx !== -1
-      ? rows.map((r, i) => (i === blankIdx ? { ...r, ...patch } : r))
-      : [...rows, { ...makeRow(), mode, ...patch }];
+    const sameModeIdx = rows.findIndex((r) => r.mode === mode && isBlank(r));
+    if (sameModeIdx !== -1) {
+      return rows.map((r, i) => (i === sameModeIdx ? { ...r, ...patch } : r));
+    }
+    const pristineIdx =
+      mode !== 'function' ? rows.findIndex((r) => r.mode === 'function' && PLOT_SPEC_BLANK.function(r)) : -1;
+    if (pristineIdx !== -1) {
+      return rows.map((r, i) => (i === pristineIdx ? { ...r, ...patch, mode } : r));
+    }
+    return [...rows, { ...makeRow(), mode, ...patch }];
   }
   function addExpressionToPlot(spec) {
     const specs = Array.isArray(spec) ? spec : [spec];

@@ -1171,20 +1171,18 @@ function parseSolveTuples(raw, varNames) {
   return tuples;
 }
 
-function parseSolveSolutions(raw, varNames) {
-  const tuples = parseSolveTuples(raw, varNames);
-  if (!tuples) return null;
-
-  // solve() hands back an inequality solution (e.g. "x>6") as just another list element,
-  // exactly like it would a plain value - labeling it the same way a plain value gets
-  // labeled would double up on the variable ("x=x>6"). A value that's already its own
-  // top-level relation is shown as-is instead, dropping the "name[_idx]=" prefix entirely
-  // (not just the "name=" part) since the value already says which variable it constrains.
-  // piToTau only touches this *display* copy of each value, never the plain `values`
-  // themselves - reinsertRaw/tuples below (raw/saveExpr's source, see formatSolveResult/
-  // buildSaveAssignment) stay in terms of pi, which is always valid Giac syntax; "tau" isn't
-  // bound to anything in the engine, so it'd be a broken reference if reinserted or saved.
-  const clauses = tuples.map((values, idx) => {
+// solve() hands back an inequality solution (e.g. "x>6") as just another list element,
+// exactly like it would a plain value - labeling it the same way a plain value gets labeled
+// would double up on the variable ("x=x>6"). A value that's already its own top-level
+// relation is shown as-is instead, dropping the "name[_idx]=" prefix entirely (not just the
+// "name=" part) since the value already says which variable it constrains. piToTau only
+// touches this *display* copy of each value, never the plain `values` themselves -
+// reinsertRaw/tuples (raw/saveExpr's source, see formatSolveResult/buildSaveAssignment) stay
+// in terms of pi, which is always valid Giac syntax; "tau" isn't bound to anything in the
+// engine, so it'd be a broken reference if reinserted or saved. Shared by parseSolveSolutions
+// below and parseCertificateOfExistence's single-witness-point case.
+function labelSolveTuples(tuples, varNames) {
+  return tuples.map((values, idx) => {
     const suffix = tuples.length > 1 ? `_${idx + 1}` : '';
     return varNames
       .map((name, i) => {
@@ -1193,6 +1191,13 @@ function parseSolveSolutions(raw, varNames) {
       })
       .join(' and ');
   });
+}
+
+function parseSolveSolutions(raw, varNames) {
+  const tuples = parseSolveTuples(raw, varNames);
+  if (!tuples) return null;
+
+  const clauses = labelSolveTuples(tuples, varNames);
 
   let reinsertRaw;
   if (tuples.length === 1) {
@@ -1236,21 +1241,62 @@ function renderGatheredLatex(clauses) {
 }
 
 // Builds the {text, latex} pair for a solve() result once it's known which variables solve()
+// solve()'s own numeric fallback for a system/inequality it couldn't resolve symbolically:
+// instead of the usual list of solution tuples, it hands back one witness point paired with a
+// fixed English sentence, e.g. `[[-1,0],"Certificate of existence, more solutions may exist"]`
+// for a 2-variable system - triggered by the bracketed solve() var list wrapBareEquation always
+// uses for more than one unknown (see its own comment on that quirk). parseSolveTuples can't
+// parse this as ordinary solution tuples - the sentence isn't a value, and its own internal
+// comma throws off splitTopLevel, which has no notion of string quoting - so without this it
+// falls all the way through formatSolveResult to the generic fetchLatex path and renders as
+// Giac's raw bracket/quote syntax verbatim. The sentence itself is a fixed string Giac's engine
+// emits for this exact fallback (not something to pattern-match loosely), so it's matched
+// literally rather than parsed generically. Returns null if `raw` isn't shaped like this at all.
+const CERTIFICATE_OF_EXISTENCE_SENTENCE = 'Certificate of existence, more solutions may exist';
+const CERTIFICATE_OF_EXISTENCE_SUFFIX = `,"${CERTIFICATE_OF_EXISTENCE_SENTENCE}"]`;
+function parseCertificateOfExistence(raw, varNames) {
+  if (!raw.startsWith('[') || !raw.endsWith(CERTIFICATE_OF_EXISTENCE_SUFFIX)) return null;
+  const pointText = raw.slice(1, raw.length - CERTIFICATE_OF_EXISTENCE_SUFFIX.length);
+  // Reuses parseSolveTuples by wrapping the single witness point back into the one-tuple list
+  // shape it expects (`[x,y]` -> `[[x,y]]`), rather than duplicating its tuple-parsing logic.
+  const tuples = parseSolveTuples(`[${pointText}]`, varNames);
+  return tuples && tuples.length === 1 ? tuples : null;
+}
+
+// Builds the {text, latex} pair for a solve() result once it's known which variables solve()
 // was given (see parseSolveVarList) - shared by evaluate() and both spots in evaluateApprox()
 // that need it. Returns null (meaning: fall back to Giac's own rendering) whenever `varNames`
-// is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions).
-// `saveExpr` (see buildSaveAssignment) is the entry's own "save" button's assignment
-// statement, or null when this result isn't a plain enough value to save.
+// is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions) or its
+// "certificate of existence" numeric fallback (see parseCertificateOfExistence). `saveExpr`
+// (see buildSaveAssignment) is the entry's own "save" button's assignment statement, or null
+// when this result isn't a plain enough value to save - always null for the certificate case,
+// since a witness point isn't the full solution set and shouldn't be offered as one to save.
 function formatSolveResult(raw, varNames) {
   const parsed = varNames && parseSolveSolutions(raw, varNames);
-  if (!parsed) return null;
-  const { clauses, reinsertRaw, tuples } = parsed;
-  return {
-    text: clauses.join('\n'),
-    latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
-    raw: reinsertRaw !== undefined ? reinsertRaw : raw,
-    saveExpr: buildSaveAssignment(tuples, varNames),
-  };
+  if (parsed) {
+    const { clauses, reinsertRaw, tuples } = parsed;
+    return {
+      text: clauses.join('\n'),
+      latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
+      raw: reinsertRaw !== undefined ? reinsertRaw : raw,
+      saveExpr: buildSaveAssignment(tuples, varNames),
+    };
+  }
+
+  const certificateTuples = varNames && parseCertificateOfExistence(raw, varNames);
+  if (certificateTuples) {
+    const clause = labelSolveTuples(certificateTuples, varNames)[0];
+    const note = 'found numerically — more solutions may exist';
+    const clauseLatex = giacToLatex(clause);
+    return {
+      text: `${clause} (${note})`,
+      latex: clauseLatex != null ? `${clauseLatex}\\quad(\\text{${note}})` : null,
+      raw,
+      saveExpr: null,
+    };
+  }
+
+  return null;
 }
 
 // Recognizes a desolve(...) call and returns the name of the unknown function it solves for,

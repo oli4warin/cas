@@ -8,7 +8,15 @@ import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js'
 import { substitutePlotParams } from './plotParams.js';
 import { parseDiffEq, buildFieldComponents } from './plotDiffEq.js';
 import { distributionDomainExpr, DISTRIBUTION_FAMILIES, resolveDistributionCdfPlan } from './distributionParams.js';
-import { parseSystemLines, traceContourSegments, orientForHolds, combineInequalityGrids, buildRegionFillPolygons } from './plotSystem.js';
+import {
+  parseSystemLines,
+  parseComplexSystemLines,
+  substituteZWithXY,
+  traceContourSegments,
+  orientForHolds,
+  combineInequalityGrids,
+  buildRegionFillPolygons,
+} from './plotSystem.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -58,6 +66,48 @@ export function parseSampleList(raw) {
   return splitTopLevel(inner).map((tok) => {
     const t = tok.trim();
     return NUMBER_RE.test(t) ? parseFloat(t) : NaN;
+  });
+}
+
+// A Giac complex number with an explicit imaginary part, e.g. "3.5-7.1e-14*i" (its real and
+// imaginary parts individually match NUMBER_RE, joined by the sign between them).
+const NEAR_REAL_COMPLEX_RE = /^(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)([+-]\d+(?:\.\d+)?(?:e[+-]?\d+)?)\*i$/i;
+// How far a "should be real" grid value's leftover imaginary part is allowed to stray from
+// zero, relative to its real part, before parseComplexSampleList gives up on it as genuinely
+// complex rather than floating-point noise - see that function's own comment for where this
+// noise comes from and why a fixed relative tolerance (rather than 0) is needed at all.
+const REAL_NOISE_TOLERANCE = 1e-9;
+
+// Same idea as parseSampleList, for a 'complexSystem' row's own grid (see sampleComplexSystem
+// below): a lhs-rhs that's mathematically real-valued (e.g. "z*conj(z)-4") can still come back
+// from Giac's own numeric evalf() as a complex value with a *tiny*, spurious imaginary part -
+// confirmed against the real engine, e.g. "129.1496786042241-7.105427357601002e-15*i" for a
+// grid point that's mathematically exactly 129.1496786042241 - because conj() of a non-exact
+// (irrational-looking decimal) numeric argument routes through a floating-point-lossy internal
+// computation rather than a bit-exact "negate the imaginary part". Plain parseSampleList would
+// reject every one of these as non-numeric (NaN), which - since this shows up for the vast
+// majority of a grid's points, not just a few - leaves only a handful of scattered points
+// actually recognized as real, tracing a shattered, mostly-missing curve instead of the
+// complete one (e.g. "z*conj(z)=4", the circle |z|=2, this was first noticed on). This parser
+// additionally accepts a token shaped like a complex number (NEAR_REAL_COMPLEX_RE) and keeps
+// just its real part *when* the imaginary part is negligible next to it (REAL_NOISE_TOLERANCE,
+// well above float64's own ~2e-16 relative epsilon - which is the actual scale of the noise
+// this works around - but far below any genuinely complex result, e.g. the ~1-20 range a line
+// like "conj(z)=z" would produce over a typical view) - a value that's still meaningfully
+// complex past that tolerance is NaN, same as parseSampleList's own out-of-domain convention.
+export function parseComplexSampleList(raw) {
+  const s = raw.trim();
+  if (!s.startsWith('[') || !s.endsWith(']')) return null;
+  const inner = s.slice(1, -1);
+  if (!inner.trim()) return [];
+  return splitTopLevel(inner).map((tok) => {
+    const t = tok.trim();
+    if (NUMBER_RE.test(t)) return parseFloat(t);
+    const m = t.match(NEAR_REAL_COMPLEX_RE);
+    if (!m) return NaN;
+    const re = parseFloat(m[1]);
+    const im = parseFloat(m[2]);
+    return Math.abs(im) <= REAL_NOISE_TOLERANCE * Math.max(1, Math.abs(re)) ? re : NaN;
   });
 }
 
@@ -270,36 +320,57 @@ export function buildScalarGridExpr(expr, xmin, xmax, ymin, ymax, nx, ny) {
   return `evalf(seq(subst(subst((${expr}),x=(${gxAt})),y=(${gyAt})),k,0,${n - 1}))`;
 }
 
-// Samples every line of a 'system' row's text (see lib/plotSystem.js's parseSystemLines) over
-// `view` on an nx-by-ny grid: each equation's lhs-rhs is traced into contour segments
-// (traceContourSegments); every inequality's own *oriented* lhs-rhs (see orientForHolds) is
-// kept as its own grid and, once every line's been sampled, combined into one merged
-// "solution region" (combineInequalityGrids, then buildRegionFillPolygons for its fill and
-// traceContourSegments again for its own boundary) - the system's actual feasible region (every
-// inequality holding at once), not each inequality's own half-plane shown separately. Only
-// when there are at least two equations (a lone equation has a whole curve of solutions, not
-// isolated points - a determined system needs as many equations as unknowns) are the equations
-// alone (never the inequalities - there's no single numeric point to solve a region down to)
-// solved together for their real numeric intersection point(s). Sequential engine round trips
-// throughout - one per line, plus (when applicable) one more for the solve - same reason
-// sampleScatter's two calls are (the shared bridge only ever resolves one dependent step of a
-// caller's own at a time). Propagates parseSystemLines' own Error for a line that isn't a
-// relation in x/y at all, same as every other mode's own validation.
-export async function sampleSystem(evaluateRaw, text, view, nx, ny, definitions) {
-  const lines = parseSystemLines(text, definitions);
-  if (lines.length === 0) return { equations: [], inequalityRegion: null, solutionPoints: [] };
+const BOUND_X_RE = /\bx\b/g;
+const BOUND_Y_RE = /\by\b/g;
 
-  const { xmin, xmax, ymin, ymax } = view;
+// Same grid-batching idea as buildScalarGridExpr, for sampleComplexSystem below - but binds
+// x/y into `expr` by rewriting the bare tokens as plain text and letting Giac parse the result
+// fresh per grid point, rather than through subst() the way buildScalarGridExpr does. This
+// isn't just style: confirmed against the real engine that subst() breaks arg() specifically
+// at a *literal* x=0 (not a derived/symbolic one - `subst(arg(x+i*y),x=0)` comes back "undef"
+// for every y, even though `arg(0+i*y)` typed directly, or reached by substituting y first,
+// evaluates fine) - a real column of the grid `arg(z)` (an ordinary thing to plot, e.g.
+// "arg(z)=pi/4") would otherwise pass through routinely. Reparsing fresh side-steps it the same
+// way substituteZWithXY's own reparse sidesteps subst()'s re/im/arg/conj argument-freezing bug
+// - so this is used for every 'complexSystem' grid, not just ones actually calling arg(), to
+// keep the two rows' sampling paths simple and uniformly safe rather than singling out arg().
+// `expr` is assumed free of "k" (the grid's own loop variable) and any function named literally
+// "x" or "y" (never true here - see parseSystemLine's collectFreeVariables check, which would
+// already have rejected an isolated name besides x/y before this is ever reached).
+export function buildComplexScalarGridExpr(expr, xmin, xmax, ymin, ymax, nx, ny) {
   const nX = Math.max(2, Math.floor(nx));
   const nY = Math.max(2, Math.floor(ny));
+  const stepX = (xmax - xmin) / (nX - 1);
+  const stepY = (ymax - ymin) / (nY - 1);
+  const gxAt = `(${formatNum(xmin)})+(iquo(k,${nY}))*(${formatNum(stepX)})`;
+  const gyAt = `(${formatNum(ymin)})+(irem(k,${nY}))*(${formatNum(stepY)})`;
+  const pointExpr = expr.replace(BOUND_X_RE, `(${gxAt})`).replace(BOUND_Y_RE, `(${gyAt})`);
+  const n = nX * nY;
+  return `evalf(seq((${pointExpr}),k,0,${n - 1}))`;
+}
 
+// Shared by sampleSystem and sampleComplexSystem below: samples each already-parsed line's own
+// `buildFExpr(line)` (its lhs-rhs, still in terms of whatever plane variables the grid itself is
+// over - x/y directly for 'system', or already rewritten from z for 'complexSystem' - see
+// substituteZWithXY) on an nx-by-ny grid over `view`, batched into one request per line via
+// `buildGridExpr` (buildScalarGridExpr for 'system', buildComplexScalarGridExpr for
+// 'complexSystem' - see its own comment for why that one avoids subst()) and parsed back into
+// numbers via `parseValues` (parseSampleList for 'system', parseComplexSampleList for
+// 'complexSystem' - see its own comment for why that one needs a floating-point tolerance
+// plain parseSampleList doesn't), tracing every equation into contour segments
+// (traceContourSegments) and combining every inequality's own *oriented* grid (orientForHolds)
+// into one merged "solution region" (combineInequalityGrids, then buildRegionFillPolygons for
+// its fill and traceContourSegments again for its own boundary) - the system's actual feasible
+// region (every inequality holding at once), not each inequality's own half-plane shown
+// separately. One engine round trip per line. Propagates a line's own evaluation error, same as
+// every other mode's own validation.
+async function traceSystemLines(evaluateRaw, lines, buildFExpr, buildGridExpr, parseValues, xmin, xmax, ymin, ymax, nX, nY) {
   const equations = [];
   const orientedInequalityGrids = [];
   for (const line of lines) {
-    const fExpr = `(${line.lhs})-(${line.rhs})`;
-    const out = await evaluateRaw(buildScalarGridExpr(fExpr, xmin, xmax, ymin, ymax, nX, nY));
+    const out = await evaluateRaw(buildGridExpr(buildFExpr(line), xmin, xmax, ymin, ymax, nX, nY));
     if (out.startsWith('GIAC_ERROR')) throw new Error(out.slice(11).trim() || `Could not evaluate "${line.raw}".`);
-    const values = parseSampleList(out);
+    const values = parseValues(out);
     if (!values) throw new Error('Unexpected response from the CAS engine.');
 
     const grid = [];
@@ -320,6 +391,40 @@ export async function sampleSystem(evaluateRaw, text, view, nx, ny, definitions)
       boundary: traceContourSegments(combined, xmin, xmax, ymin, ymax, nX, nY),
     };
   }
+  return { equations, inequalityRegion };
+}
+
+// Samples every line of a 'system' row's text (see lib/plotSystem.js's parseSystemLines) over
+// `view` on an nx-by-ny grid (see traceSystemLines above for the curve/region tracing itself).
+// Only when there are at least two equations (a lone equation has a whole curve of solutions,
+// not isolated points - a determined system needs as many equations as unknowns) are the
+// equations alone (never the inequalities - there's no single numeric point to solve a region
+// down to) solved together for their real numeric intersection point(s), one more engine round
+// trip on top of traceSystemLines' own one-per-line - same reason sampleScatter's two calls are
+// sequential (the shared bridge only ever resolves one dependent step of a caller's own at a
+// time). Propagates parseSystemLines' own Error for a line that isn't a relation in x/y at all,
+// same as every other mode's own validation.
+export async function sampleSystem(evaluateRaw, text, view, nx, ny, definitions) {
+  const lines = parseSystemLines(text, definitions);
+  if (lines.length === 0) return { equations: [], inequalityRegion: null, solutionPoints: [] };
+
+  const { xmin, xmax, ymin, ymax } = view;
+  const nX = Math.max(2, Math.floor(nx));
+  const nY = Math.max(2, Math.floor(ny));
+
+  const { equations, inequalityRegion } = await traceSystemLines(
+    evaluateRaw,
+    lines,
+    (line) => `(${line.lhs})-(${line.rhs})`,
+    buildScalarGridExpr,
+    parseSampleList,
+    xmin,
+    xmax,
+    ymin,
+    ymax,
+    nX,
+    nY,
+  );
 
   const equationLines = lines.filter((l) => l.kind === 'equation');
   let solutionPoints = [];
@@ -340,6 +445,58 @@ export async function sampleSystem(evaluateRaw, text, view, nx, ny, definitions)
   }
 
   return { equations, inequalityRegion, solutionPoints };
+}
+
+// Samples every line of a 'complexSystem' row's text (see lib/plotSystem.js's
+// parseComplexSystemLines - one equation/inequality per line, in "z" alone) the exact same way
+// sampleSystem does, mapped onto the real x/y plane via the standard z=x+i*y identification (so
+// "abs(z)<2" becomes the familiar disk x^2+y^2<4, traced/shaded on the same x/y grid 'system'
+// itself uses) - each line's own lhs-rhs has its "z" rewritten to "(x+i*y)" as plain text (see
+// substituteZWithXY - deliberately *not* done via Giac's own subst(), which was confirmed
+// against the real engine to mishandle re/im/arg/conj that way), then batched onto the grid via
+// buildComplexScalarGridExpr rather than buildScalarGridExpr (see its own comment - the x/y
+// grid substitution itself also needs to avoid subst() here, for the same category of reason:
+// arg() specifically breaks under subst() at a literal x=0).
+//
+// Deliberately never attempts sampleSystem's own "solve for isolated intersection points" step,
+// even when there are 2+ equation lines (or, unlike a real 2-variable system, even just 1 - one
+// complex equation is already 2 real equations' worth of constraint, generically isolated
+// points): Giac's csolve() aborts the engine outright on an equation as ordinary as
+// "abs(z)=2" (confirmed against the real engine - not a timeout, an uncaught native exception),
+// and most hand-typed complex equations lean on exactly these non-holomorphic functions
+// (abs/arg/conj) that trigger it. The curve/region tracing above needs no solve() at all, so it
+// stays fully safe either way - only the point-solving extra is skipped.
+//
+// A line whose lhs-rhs isn't actually real-valued (e.g. "conj(z)=z", rather than the equivalent
+// real-valued "im(z)=0") just traces/shades as empty rather than erroring - parseSampleList
+// already turns a non-numeric grid token (Giac hands back a genuinely complex value like "4*i"
+// there) into NaN the same way it would any other out-of-domain point, and every consumer down
+// the line (traceContourSegments, combineInequalityGrids, ...) already skips a NaN cell as
+// "outside the domain" - so this degrades gracefully to "nothing drawn" rather than needing its
+// own real-valuedness check up front.
+export async function sampleComplexSystem(evaluateRaw, text, view, nx, ny, definitions) {
+  const lines = parseComplexSystemLines(text, definitions);
+  if (lines.length === 0) return { equations: [], inequalityRegion: null, solutionPoints: [] };
+
+  const { xmin, xmax, ymin, ymax } = view;
+  const nX = Math.max(2, Math.floor(nx));
+  const nY = Math.max(2, Math.floor(ny));
+
+  const { equations, inequalityRegion } = await traceSystemLines(
+    evaluateRaw,
+    lines,
+    (line) => `(${substituteZWithXY(line.lhs)})-(${substituteZWithXY(line.rhs)})`,
+    buildComplexScalarGridExpr,
+    parseComplexSampleList,
+    xmin,
+    xmax,
+    ymin,
+    ymax,
+    nX,
+    nY,
+  );
+
+  return { equations, inequalityRegion, solutionPoints: [] };
 }
 
 // Samples a differential-equation row's vector field over `view` on an nx-by-ny grid: asks

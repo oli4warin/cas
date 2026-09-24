@@ -1,9 +1,10 @@
-// Parsing/geometry for the plot panel's 'system' row (see components/plotPanel.js) - a
-// multiline text field, one equation or inequality per line, restricted to the two names
-// "x"/"y" (session-defined names - see giac.js's own collectFreeVariables - are fine, since
-// they're resolved values by the time this reaches the CAS, not genuinely free unknowns).
-// Pure parsing/math only - no engine calls here; see lib/plotSample.js's sampleSystem for the
-// actual grid evaluation and solve() round trips this builds on.
+// Parsing/geometry for the plot panel's 'system' and 'complexSystem' rows (see
+// components/plotPanel.js) - a multiline text field, one equation or inequality per line,
+// restricted to a fixed set of names: "x"/"y" for 'system', or just "z" for 'complexSystem'
+// (session-defined names - see giac.js's own collectFreeVariables - are fine either way, since
+// they're resolved values by the time this reaches the CAS, not genuinely free unknowns). Pure
+// parsing/math only - no engine calls here; see lib/plotSample.js's sampleSystem/
+// sampleComplexSystem for the actual grid evaluation and solve() round trips this builds on.
 
 import { collectFreeVariables } from './giac.js';
 
@@ -35,32 +36,71 @@ function findTopLevelRelation(s) {
   return null;
 }
 
+// "x and y" / "z" / (in principle) "a, b and c" - however many names `allowedVars` holds,
+// worded the way the error messages below read naturally either way.
+function formatVarList(allowedVars) {
+  if (allowedVars.length === 1) return allowedVars[0];
+  return `${allowedVars.slice(0, -1).join(', ')} and ${allowedVars[allowedVars.length - 1]}`;
+}
+
 // Parses one line into {raw, lhs, rhs, op, kind} - kind 'equation' for "=", 'inequality' for
 // the four ordering relations. Throws a user-facing Error (surfaced as the row's own error,
 // same as every other mode's sampling error - see plotPanel.js) when the line isn't a
 // relation at all, is a "!=" (no sensible curve or shaded region), or names any variable
-// besides x/y.
-export function parseSystemLine(rawLine, definitions = new Map()) {
+// besides `allowedVars` (["x","y"] for the 'system' row, ["z"] for 'complexSystem').
+export function parseSystemLine(rawLine, definitions = new Map(), allowedVars = ['x', 'y']) {
   const line = rawLine.trim().replace(/;\s*$/, '').trim();
+  const varList = formatVarList(allowedVars);
   const rel = findTopLevelRelation(line);
-  if (!rel) throw new Error(`"${line}" is not an equation or inequality in x and y.`);
+  if (!rel) throw new Error(`"${line}" is not an equation or inequality in ${varList}.`);
   if (rel.op === '!=') throw new Error(`"${line}": "!=" can't be plotted as a curve or region.`);
   const lhs = line.slice(0, rel.index).trim();
   const rhs = line.slice(rel.index + rel.length).trim();
-  const extra = collectFreeVariables(`(${lhs})-(${rhs})`, definitions).filter((v) => v !== 'x' && v !== 'y');
-  if (extra.length > 0) throw new Error(`Only x and y are allowed here (found "${extra[0]}").`);
+  const extra = collectFreeVariables(`(${lhs})-(${rhs})`, definitions).filter((v) => !allowedVars.includes(v));
+  if (extra.length > 0) {
+    throw new Error(`Only ${varList} ${allowedVars.length === 1 ? 'is' : 'are'} allowed here (found "${extra[0]}").`);
+  }
   return { raw: line, lhs, rhs, op: rel.op, kind: rel.op === '=' ? 'equation' : 'inequality' };
 }
 
 // Parses every non-blank line of a system row's text, in order - throws on the first line
 // that fails parseSystemLine (blank text/no lines just yields an empty array, same as every
 // other mode's "nothing typed yet" case).
-export function parseSystemLines(text, definitions = new Map()) {
+export function parseSystemLines(text, definitions = new Map(), allowedVars = ['x', 'y']) {
   return (text ?? '')
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
-    .map((l) => parseSystemLine(l, definitions));
+    .map((l) => parseSystemLine(l, definitions, allowedVars));
+}
+
+// Thin, self-documenting wrappers around the above for the 'complexSystem' row - every line
+// named in terms of "z" alone rather than "x"/"y" (see sampleComplexSystem in lib/plotSample.js,
+// which maps each parsed line's lhs-rhs back into the real x/y plane via z=x+i*y before
+// sampling it on the exact same grid/marching-squares machinery 'system' itself uses).
+export function parseComplexSystemLine(rawLine, definitions = new Map()) {
+  return parseSystemLine(rawLine, definitions, ['z']);
+}
+export function parseComplexSystemLines(text, definitions = new Map()) {
+  return parseSystemLines(text, definitions, ['z']);
+}
+
+// Rewrites the bound variable "z" in `text` (already validated by parseComplexSystemLine to be
+// the only free name it can contain) to its literal real/imaginary decomposition "(x+i*y)" -
+// plain text handed back to the engine to parse fresh, rather than substituted into an
+// already-parsed expression via Giac's own subst(). Deliberately not subst(): confirmed against
+// the real engine that subst() silently leaves several complex-accessor functions' argument
+// unevaluated once that argument is itself a substitution result rather than a literal -
+// `subst(re(z),z=1+i)` comes back as `1+i`, not `1` (same for im/arg/conj - abs() alone is
+// unaffected, so this isn't something that shows up with the module's own leading example,
+// "abs(z)<2"). Re-parsing "re(x+i*y)" directly - as this produces - doesn't have that problem;
+// confirmed against the real engine that it simplifies correctly (down to plain "x"). Word-
+// bounded so this only ever replaces the bound "z" token itself, never a "z" that's part of a
+// longer identifier (a stray one would have already been rejected by parseComplexSystemLine's
+// own single-name validation before this is ever called).
+const BOUND_Z_RE = /\bz\b/g;
+export function substituteZWithXY(text) {
+  return text.replace(BOUND_Z_RE, '(x+i*y)');
 }
 
 // Linear-interpolated fraction of the way from `v0` to `v1` where the value crosses zero -

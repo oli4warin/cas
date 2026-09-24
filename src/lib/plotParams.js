@@ -22,12 +22,31 @@ import { collectFreeVariables, expandKnownFunctionCalls } from './giac.js';
 // own dedicated fields (see lib/plotRows.js's `params`/lib/distributionParams.js), not free
 // variables detected from expression text.
 //
-// system gets no sliders either, and deliberately so: unlike every other mode, a system row's
-// own lib/plotSystem.js validation already rejects any name besides x/y outright (a plain,
-// user-facing error rather than a slider offer) - see its own module comment for why a
-// "system of equations in x and y" is meant to stay exactly that.
-const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [], diffeq: [], distribution: [], system: ['x', 'y'] };
-const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [], diffeq: [], distribution: [], system: [] };
+// system/complexSystem get no sliders either, and deliberately so: unlike every other mode, a
+// system(-like) row's own lib/plotSystem.js validation already rejects any name besides its own
+// fixed set (x/y, or z for complexSystem) outright (a plain, user-facing error rather than a
+// slider offer) - see its own module comment for why a "system of equations" is meant to stay
+// exactly that.
+const BOUND_VARS = {
+  function: ['x'],
+  parametric: ['t'],
+  complex: ['t'],
+  scatter: [],
+  diffeq: [],
+  distribution: [],
+  system: ['x', 'y'],
+  complexSystem: ['z'],
+};
+const PARAM_FIELDS = {
+  function: ['expr'],
+  parametric: ['exprX', 'exprY'],
+  complex: ['exprZ'],
+  scatter: [],
+  diffeq: [],
+  distribution: [],
+  system: [],
+  complexSystem: [],
+};
 
 const DEFAULT_SLIDER = { value: 1, min: -10, max: 10, step: 0.1 };
 

@@ -8,6 +8,7 @@ import {
   sampleScatter,
   sampleDiffEqField,
   sampleSystem,
+  sampleComplexSystem,
   sampleContinuousDistribution,
   sampleDiscreteDistribution,
   resolveDistributionBounds,
@@ -37,11 +38,13 @@ function rowColor(row, index) {
   return row.color || COLORS[index % COLORS.length];
 }
 
-// A system row's own preview text: every non-blank line joined with "and" into one line
-// ("x>5 and y>-x+4") and run through giacToLatex as a single expression - giacToLatex already
-// renders "and" as a spaced-out \text{and} between its operands (see LOGICAL_WORDS in
-// lib/giacToLatex.js), which is exactly the right reading here since that's also how the rows
-// actually get combined for solve()/the merged region (see sampleSystem in lib/plotSample.js).
+// A system (or complexSystem) row's own preview text: every non-blank line joined with "and"
+// into one line ("x>5 and y>-x+4") and run through giacToLatex as a single expression -
+// giacToLatex already renders "and" as a spaced-out \text{and} between its operands (see
+// LOGICAL_WORDS in lib/giacToLatex.js), which is exactly the right reading here since that's
+// also how the rows actually get combined for solve()/the merged region (see sampleSystem/
+// sampleComplexSystem in lib/plotSample.js) - variable-agnostic, so this same function serves
+// both rows without caring whether the lines are in x/y or z.
 function systemPreviewLatex(text) {
   const lines = text
     .split('\n')
@@ -58,6 +61,7 @@ function fieldOrder(row) {
   if (row.mode === 'diffeq') return ['exprDE'];
   if (row.mode === 'parametric' || row.mode === 'scatter') return ['exprX', 'exprY'];
   if (row.mode === 'system') return ['exprSystem'];
+  if (row.mode === 'complexSystem') return ['exprComplexSystem'];
   // No ordinary text field to Enter-tab through here - the family <select> and its param/bound
   // inputs are all rendered by buildFields('distribution') below and wired directly, rather
   // than through the field-order/makeField machinery the other modes share.
@@ -448,6 +452,7 @@ function createRowView({
     h('option', { value: 'diffeq' }, 'differential equation'),
     h('option', { value: 'distribution' }, 'probability distribution'),
     h('option', { value: 'system' }, 'system of equations (x,y)'),
+    h('option', { value: 'complexSystem' }, 'complex equations (z)'),
   );
   const fieldsWrap = h('span');
   const toggleBtn = h('button', { type: 'button', class: 'plot-row__toggle', onclick: onToggle }, '●');
@@ -612,6 +617,13 @@ function createRowView({
         'Equations are traced as curves and (with 2+ of them) solved for their intersection ' +
         'point(s); inequalities are shaded at 30% opacity.';
       fieldsWrap.append(field);
+    } else if (mode === 'complexSystem') {
+      const field = makeMultilineField('exprComplexSystem', 'abs(z)<2\nRe(z)>0');
+      field.title =
+        'One equation or inequality per line, in z only - Shift+Enter for a new line. Plotted ' +
+        'over the real/imaginary plane (z=x+i*y): equations are traced as curves, inequalities ' +
+        'shaded at 30% opacity.';
+      fieldsWrap.append(field);
     } else {
       fieldsWrap.append(makeField('expr', 'e.g. sin(x), f(x), a*x+b, sin(x)|0<x<7', undefined));
     }
@@ -683,9 +695,11 @@ function createRowView({
     }
     for (const field of fieldOrder(row)) {
       if (fieldEls[field] && fieldEls[field].value !== row[field]) fieldEls[field].value = row[field];
-      // A system row's field holds several lines at once - preview them "and"-joined into one
-      // line (see systemPreviewLatex) rather than as one run-on expression.
-      previews[field]?.update(row.mode === 'system' ? systemPreviewLatex(row[field]) : giacToLatex(row[field]) || '');
+      // A system/complexSystem row's field holds several lines at once - preview them
+      // "and"-joined into one line (see systemPreviewLatex) rather than as one run-on
+      // expression.
+      const isMultiline = row.mode === 'system' || row.mode === 'complexSystem';
+      previews[field]?.update(isMultiline ? systemPreviewLatex(row[field]) : giacToLatex(row[field]) || '');
     }
     if (tminEl && tminEl.value !== row.tmin) tminEl.value = row.tmin;
     if (tmaxEl && tmaxEl.value !== row.tmax) tmaxEl.value = row.tmax;
@@ -1105,10 +1119,13 @@ export function PlotPanel({
       const isDistribution = row.mode === 'distribution';
       const discrete = isDistribution && DISTRIBUTION_FAMILIES[row.family]?.discrete;
       const stored = curves[row.id];
-      if (row.mode === 'system') {
+      if (row.mode === 'system' || row.mode === 'complexSystem') {
         // stored.points is here the compound {equations, inequalityRegion, solutionPoints}
-        // shape sampleSystem returns, not a flat array - see draw()'s own 'system' style,
-        // which is the only one that ever reads it.
+        // shape sampleSystem/sampleComplexSystem returns, not a flat array - see draw()'s own
+        // 'system' style, which is the only one that ever reads it. Both modes share this same
+        // style since sampleComplexSystem's own output is already in the real x/y plane by the
+        // time it gets here (see its own comment in lib/plotSample.js) - nothing about drawing
+        // it differs from a real 'system' row's.
         return { id: row.id, color: rowColor(row, i), visible: row.visible, points: stored?.points, style: 'system' };
       }
       return {
@@ -1162,12 +1179,13 @@ export function PlotPanel({
     // as a flow, without so many arrows they blur into a solid smear.
     const fieldNx = Math.max(10, Math.min(40, Math.round(width / 32)));
     const fieldNy = Math.max(8, Math.min(30, Math.round(height / 32)));
-    // Denser than the vector field above - a system row's grid has to resolve both a smooth
-    // implicit-curve contour (marching squares - see traceContourSegments in lib/plotSystem.js)
-    // and an inequality's own region fill (buildRegionFillPolygons already interpolates each
-    // cell's own boundary sub-pixel-precisely, but a curved boundary like a circle still reads
-    // faceted at too coarse a grid - this resolution is chosen to keep that unnoticeable at a
-    // typical zoom level without costing more than roughly half a second per line).
+    // Denser than the vector field above - a system/complexSystem row's grid has to resolve
+    // both a smooth implicit-curve contour (marching squares - see traceContourSegments in
+    // lib/plotSystem.js) and an inequality's own region fill (buildRegionFillPolygons already
+    // interpolates each cell's own boundary sub-pixel-precisely, but a curved boundary like a
+    // circle still reads faceted at too coarse a grid - this resolution is chosen to keep that
+    // unnoticeable at a typical zoom level without costing more than roughly half a second per
+    // line).
     const sysNx = Math.max(70, Math.min(180, Math.round(width / 3.5)));
     const sysNy = Math.max(50, Math.min(130, Math.round(height / 3.5)));
 
@@ -1215,6 +1233,12 @@ export function PlotPanel({
           continue;
         }
         sampleSystem(evaluateRaw, row.exprSystem, effView, sysNx, sysNy, definitions).then(applyResult, applyError);
+      } else if (row.mode === 'complexSystem') {
+        if (!row.exprComplexSystem.trim()) {
+          delete curves[row.id];
+          continue;
+        }
+        sampleComplexSystem(evaluateRaw, row.exprComplexSystem, effView, sysNx, sysNy, definitions).then(applyResult, applyError);
       } else if (row.mode === 'distribution') {
         const cfg = DISTRIBUTION_FAMILIES[row.family];
         if (!cfg) {

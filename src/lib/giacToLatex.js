@@ -429,6 +429,13 @@ function renderCall(node) {
 
   if (lname === 'sqrt') return `\\sqrt{${a(0)}}`;
   if (lname === 'abs') return `\\left|${a(0)}\\right|`;
+  // Complex conjugate - the standard overline notation, matching what Giac's own latex()
+  // already renders for conj() whenever it survives evaluation unresolved (e.g. conj(f(z)) for
+  // an undefined f - confirmed against the real engine). This syntax-only renderer needs its
+  // own case for it too since it never asks the engine to simplify anything - a bare "conj(z)"
+  // typed into a live preview (the main input, or a 'complexSystem' plot row's own field - see
+  // components/plotPanel.js) never reaches the engine at all before being shown.
+  if (lname === 'conj') return `\\overline{${a(0)}}`;
   if (lname === 'exp') return `\\mathrm{e}^{${a(0)}}`;
   if (lname === 'ln') return `\\ln${primes}\\left(${a(0)}\\right)`;
   if (lname === 'log' || lname === 'logb') return has(1) ? `\\log_{${a(1)}}${primes}\\left(${a(0)}\\right)` : `\\log${primes}\\left(${a(0)}\\right)`;

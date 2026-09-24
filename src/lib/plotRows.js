@@ -28,13 +28,14 @@ let nextRowId = 1;
 export function makeRow() {
   return {
     id: nextRowId++,
-    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq' | 'distribution' | 'system'
+    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq' | 'distribution' | 'system' | 'complexSystem'
     expr: '',
     exprX: '',
     exprY: '',
     exprZ: '',
     exprDE: '',
     exprSystem: '', // 'system' row: one equation/inequality per line, in x and y only - see lib/plotSystem.js
+    exprComplexSystem: '', // 'complexSystem' row: same, but in z only - see lib/plotSystem.js's parseComplexSystemLines
 
     tmin: DEFAULT_TMIN,
     tmax: DEFAULT_TMAX,

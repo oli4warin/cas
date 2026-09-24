@@ -11,9 +11,9 @@ import { parseDefinition } from './definitions.js';
 import { isPlottableInX, reinsertableValue, parseRegressionCall } from './giac.js';
 import { parseDiffEq } from './plotDiffEq.js';
 import { parseDistributionCdfCall } from './distributionParams.js';
-import { parseSystemLines } from './plotSystem.js';
+import { parseSystemLines, parseComplexSystemLines } from './plotSystem.js';
 
-// Five shapes count as plottable from an entry's *input*: a function this session just
+// Six shapes count as plottable from an entry's *input*: a function this session just
 // defined with exactly one parameter (f(x):=..., or even f(t):=... - calling it back as
 // "f(x)" always comes out as an expression in x regardless of what the definition itself calls
 // its own parameter, since Giac substitutes whatever's actually passed), a differential
@@ -31,18 +31,22 @@ import { parseSystemLines } from './plotSystem.js';
 // lib/plotSystem.js's parseSystemLines - the same "one per line, x/y only" shape the plot
 // panel's own 'system' row takes), offered as that whole system verbatim, line breaks and all
 // (the 'system' row's sampling re-parses it the exact same way, and traces/shades/solves it -
-// see lib/plotSample.js's sampleSystem). Checked one line at a time so a multi-line
+// see lib/plotSample.js's sampleSystem) - or the same idea once more but in z alone (see
+// parseComplexSystemLines, the 'complexSystem' row's own shape, e.g. "abs(z)<2"), offered as
+// that whole system verbatim the same way. Checked one line at a time so a multi-line
 // initial-value problem (the ODE on one line, "y(0)=3" on the next - see wrapBareEquation in
 // giac.js) still finds the ODE line; a line that isn't shaped like any of these (no derivative,
-// or a 3rd-order+ one) just falls through to the next. The system check runs last and over the
-// *whole* input at once (not per line) since it needs every line to qualify together, not just
-// one - it's only reached once every line has already failed both the distribution and diffeq
-// checks, so a real differential equation or `_cdf` call is never mistaken for one more
-// "equation in x/y" line. Returns `{mode, patch}` (or an array of those, for regression) ready
-// to spread onto the plot panel's row shape, or null if nothing in this input is offerable this
-// way. `definitions` (the session's own assigned names) is only used for the system check - see
-// parseSystemLine's own reasoning for why an already-assigned name doesn't disqualify a line the
-// way a genuinely free one does.
+// or a 3rd-order+ one) just falls through to the next. The two system checks run last, over the
+// *whole* input at once (not per line) since each needs every line to qualify together, not
+// just one - they're only reached once every line has already failed both the distribution and
+// diffeq checks, so a real differential equation or `_cdf` call is never mistaken for one more
+// "equation in x/y (or z)" line; the real-system check runs first since a line naming x/y can
+// never also satisfy the complex check's own z-only restriction, so the order between them
+// never actually matters in practice. Returns `{mode, patch}` (or an array of those, for
+// regression) ready to spread onto the plot panel's row shape, or null if nothing in this input
+// is offerable this way. `definitions` (the session's own assigned names) is only used for the
+// two system checks - see parseSystemLine's own reasoning for why an already-assigned name
+// doesn't disqualify a line the way a genuinely free one does.
 export function plottableInputForEntry(entry, definitions = new Map()) {
   if (!entry || entry.isError) return null;
 
@@ -81,7 +85,15 @@ export function plottableInputForEntry(entry, definitions = new Map()) {
     }
   } catch {
     // Not a system of equations/inequalities in x and y either (some other command entirely,
-    // or one naming a variable besides x/y) - nothing left to offer.
+    // or one naming a variable besides x/y) - keep looking, it might be one in z instead.
+  }
+
+  try {
+    if (parseComplexSystemLines(entry.input, definitions).length > 0) {
+      return { mode: 'complexSystem', patch: { exprComplexSystem: entry.input } };
+    }
+  } catch {
+    // Not a system of equations/inequalities in z either - nothing left to offer.
   }
   return null;
 }
