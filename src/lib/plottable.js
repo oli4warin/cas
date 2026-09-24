@@ -8,31 +8,44 @@
 // whichever half is selected should plot exactly that one, never the other.
 
 import { parseDefinition } from './definitions.js';
-import { isPlottableInX, reinsertableValue } from './giac.js';
+import { isPlottableInX, reinsertableValue, parseRegressionCall } from './giac.js';
 import { parseDiffEq } from './plotDiffEq.js';
 import { parseDistributionCdfCall } from './distributionParams.js';
 
-// Three shapes count as plottable from an entry's *input*: a function this session just
+// Four shapes count as plottable from an entry's *input*: a function this session just
 // defined with exactly one parameter (f(x):=..., or even f(t):=... - calling it back as
 // "f(x)" always comes out as an expression in x regardless of what the definition itself calls
 // its own parameter, since Giac substitutes whatever's actually passed), a differential
 // equation in y (checked with the exact same parser the plot panel's own diffeq row uses - see
-// lib/plotDiffEq.js - so both agree on exactly which equations are offerable), or a
-// distribution `_cdf` call (normald_cdf, binomial_cdf, ... and their calculator-familiar
-// aliases like normcdf/binomcdf - see lib/distributionParams.js's parseDistributionCdfCall) -
-// offered as that distribution's own density/pmf with [lower,upper] shaded, directly
-// visualizing the probability the command just computed. Checked one line at a time so a
-// multi-line initial-value problem (the ODE on one line, "y(0)=3" on the next - see
-// wrapBareEquation in giac.js) still finds the ODE line; a line that isn't shaped like any of
-// these (no derivative, or a 3rd-order+ one) just falls through to the next. Returns
-// `{mode, patch}` ready to spread onto the plot panel's row shape, or null if nothing in this
-// input is offerable this way.
+// lib/plotDiffEq.js - so both agree on exactly which equations are offerable), a distribution
+// `_cdf` call (normald_cdf, binomial_cdf, ... and their calculator-familiar aliases like
+// normcdf/binomcdf - see lib/distributionParams.js's parseDistributionCdfCall) - offered as
+// that distribution's own density/pmf with [lower,upper] shaded, directly visualizing the
+// probability the command just computed - or a `<type>_regression(xExpr,yExpr)` call (see
+// lib/giac.js's parseRegressionCall/REGRESSION_NAMES), offered as *two* rows at once: the
+// (xExpr,yExpr) data itself as a scatter plot, plus the already-fitted curve this same entry's
+// output computed (entry.raw - the plain formula, since evaluateRegression in giac.js never
+// wraps it as "y=...") as an ordinary function - so one click/keypress shows the fit next to
+// the data it was fit to. Checked one line at a time so a multi-line initial-value problem (the
+// ODE on one line, "y(0)=3" on the next - see wrapBareEquation in giac.js) still finds the ODE
+// line; a line that isn't shaped like any of these (no derivative, or a 3rd-order+ one) just
+// falls through to the next. Returns `{mode, patch}` (or an array of those, for regression)
+// ready to spread onto the plot panel's row shape, or null if nothing in this input is
+// offerable this way.
 export function plottableInputForEntry(entry) {
   if (!entry || entry.isError) return null;
 
   const def = parseDefinition(entry.input);
   if (def && def.kind === 'function' && def.params.length === 1) {
     return { mode: 'function', patch: { expr: `${def.name}(x)` } };
+  }
+
+  const regression = parseRegressionCall(entry.input);
+  if (regression) {
+    return [
+      { mode: 'scatter', patch: { exprX: regression.xExpr, exprY: regression.yExpr } },
+      { mode: 'function', patch: { expr: reinsertableValue(entry.raw ?? '') } },
+    ];
   }
 
   for (const rawLine of entry.input.split('\n')) {

@@ -1320,8 +1320,10 @@ const REGRESSION_NAMES = new Set([
 // Recognizes a top-level call to one of REGRESSION_NAMES and returns its canonical name plus
 // its two argument expressions verbatim, unevaluated - or null if `expr` isn't shaped like
 // one (some other command, or the wrong argument count). Mirrors parseDesolveFuncName/
-// parseSolveVarList above.
-function parseRegressionCall(expr) {
+// parseSolveVarList above. Exported for plottableInputForEntry (lib/plottable.js), which
+// reuses it to offer a regression command's own (x,y) data as a scatter plot alongside its
+// fitted curve.
+export function parseRegressionCall(expr) {
   const s = expr.trim();
   const body = s.endsWith(';') ? s.slice(0, -1) : s;
   const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);

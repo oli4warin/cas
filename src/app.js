@@ -1495,25 +1495,37 @@ export function mountApp(root) {
   // Sends a history entry's plottable input or output (see lib/plottable.js) to the plot
   // panel - wired to both the entry's own two "plot" buttons (historyEntry.js) and the "p"
   // keyboard shortcut on whichever half is currently selected (handleKeyDown above). `spec` is
-  // `{mode, patch}` - 'function' for an ordinary y=f(x) curve (from either a function-defining
-  // input or a plain output, see plottableInputForEntry/plottableOutputForEntry), 'diffeq' for
-  // a differential equation's vector field, 'distribution' for a `_cdf` command's own
-  // distribution with its queried region shaded (see parseDistributionCdfCall). Reuses the
-  // first still-blank row of that *same* mode if there is one (the spare row a freshly
-  // opened/emptied panel always keeps ready to type into - see focusOnMount in plotPanel.js)
-  // rather than always adding a new one, so plotting right after opening the panel for the
-  // first time doesn't leave two rows where one would do; a blank row of a *different* mode is
-  // left alone, since e.g. a blank function row isn't a valid place to drop a differential
-  // equation's text. 'distribution' never reuses a blank row - unlike a single text field,
-  // "blank" isn't well-defined for a family+params row, so a fresh one is always appended.
-  const PLOT_SPEC_BLANK = { function: (r) => !r.expr.trim(), diffeq: (r) => !r.exprDE.trim(), distribution: () => false };
-  function addExpressionToPlot({ mode, patch }) {
+  // normally a single `{mode, patch}` - 'function' for an ordinary y=f(x) curve (from either a
+  // function-defining input or a plain output, see plottableInputForEntry/
+  // plottableOutputForEntry), 'diffeq' for a differential equation's vector field,
+  // 'distribution' for a `_cdf` command's own distribution with its queried region shaded (see
+  // parseDistributionCdfCall), 'scatter' for a regression command's own (x,y) data - but
+  // plottableInputForEntry hands back an *array* of two specs for a regression command (that
+  // same scatter plus the fitted curve as a 'function' row), so this also accepts an array and
+  // applies each in turn. Each spec reuses the first still-blank row of that *same* mode if
+  // there is one (the spare row a freshly opened/emptied panel always keeps ready to type into
+  // - see focusOnMount in plotPanel.js) rather than always adding a new one, so plotting right
+  // after opening the panel for the first time doesn't leave two rows where one would do; a
+  // blank row of a *different* mode is left alone, since e.g. a blank function row isn't a
+  // valid place to drop a differential equation's text. 'distribution' never reuses a blank
+  // row - unlike a single text field, "blank" isn't well-defined for a family+params row, so a
+  // fresh one is always appended.
+  const PLOT_SPEC_BLANK = {
+    function: (r) => !r.expr.trim(),
+    diffeq: (r) => !r.exprDE.trim(),
+    distribution: () => false,
+    scatter: (r) => !r.exprX.trim() && !r.exprY.trim(),
+  };
+  function applyPlotSpec(rows, { mode, patch }) {
     const isBlank = PLOT_SPEC_BLANK[mode];
-    const blankIdx = state.plotRows.findIndex((r) => r.mode === mode && isBlank(r));
-    const nextRows =
-      blankIdx !== -1
-        ? state.plotRows.map((r, i) => (i === blankIdx ? { ...r, ...patch } : r))
-        : [...state.plotRows, { ...makeRow(), mode, ...patch }];
+    const blankIdx = rows.findIndex((r) => r.mode === mode && isBlank(r));
+    return blankIdx !== -1
+      ? rows.map((r, i) => (i === blankIdx ? { ...r, ...patch } : r))
+      : [...rows, { ...makeRow(), mode, ...patch }];
+  }
+  function addExpressionToPlot(spec) {
+    const specs = Array.isArray(spec) ? spec : [spec];
+    const nextRows = specs.reduce(applyPlotSpec, state.plotRows);
     state.plotRows = nextRows;
 
     if (state.plotOpen) {
