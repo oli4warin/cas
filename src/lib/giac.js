@@ -1729,6 +1729,55 @@ function fixDifferentialD(latex) {
   return latex.replace(DIFFERENTIAL_D_RE, (_, pre) => `${pre}\\mathrm{d}`);
 }
 
+// Giac's own latex() renders any embedded natural-language string exactly the way it renders a
+// single multi-letter identifier - wrapped in "\mathrm{...}", spaces and all (e.g. solve()'s own
+// "Certificate of existence, more solutions may exist" fallback text for an inequality it
+// couldn't solve symbolically for a bracketed multi-variable list - see wrapBareEquation's own
+// comment on that quirk). "\mathrm" only switches the *font* (upright instead of italic) - it's
+// still math-mode content, not real running text, so its interior spacing isn't guaranteed to
+// render the way a sentence would; "\text{...}" (real text mode) is the correct construct for
+// that. Scoped to a "\mathrm{}" whose content contains an actual space - a real identifier or
+// operator name Giac's own latex() wraps in "\mathrm{}" never has one (an identifier can't
+// contain a space), so that's a safe, narrow signal this is prose rather than a name, and this
+// never touches the single-letter "\mathrm{e}"/"\mathrm{i}"/"\mathrm{d}" fixEulerConstant/
+// fixImaginaryUnit/fixDifferentialD above produce for a completely different reason. Scans by
+// hand (rather than a regex) so a string containing its own literal braces still matches up
+// correctly, same as fixNegatedSqrtParens above.
+function fixMathrmProseText(latex) {
+  const NEEDLE = '\\mathrm{';
+  let out = '';
+  let i = 0;
+  while (i < latex.length) {
+    const idx = latex.indexOf(NEEDLE, i);
+    if (idx === -1) {
+      out += latex.slice(i);
+      break;
+    }
+    out += latex.slice(i, idx);
+    const braceStart = idx + NEEDLE.length - 1;
+    let depth = 0;
+    let j = braceStart;
+    for (; j < latex.length; j++) {
+      if (latex[j] === '{') depth++;
+      else if (latex[j] === '}') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth === 0) {
+      const inner = latex.slice(braceStart + 1, j);
+      out += inner.includes(' ') ? `\\text{${inner}}` : `${NEEDLE}${inner}}`;
+      i = j + 1;
+    } else {
+      // Unbalanced braces - shouldn't happen for well-formed latex() output, but leave it
+      // untouched rather than risk corrupting it.
+      out += latex[idx];
+      i = idx + 1;
+    }
+  }
+  return out;
+}
+
 // How many digits (integer digits for a large number, or leading zeros past the point before
 // the first significant digit for a small one) an approximate result can show in full before
 // switching to scientific notation - e.g. 1234567 (7 digits) or 0.0000001 (first significant
@@ -1873,19 +1922,21 @@ async function fetchLatex(out) {
   // genuine LaTeX "\\" row-break (e.g. inside a matrix's \begin{array}{cc}...\end{array}),
   // so it must survive untouched; collapsing it to one (an earlier version of this code did)
   // corrupted every matrix/piecewise ("\begin{cases}") result into a single garbled row.
-  return fixNegatedSqrtParens(
-    fixDifferentialD(
-      fixPauSymbol(
-        fixImaginaryUnit(
-          fixEulerConstant(
-            fixScientificNotation(
-              stripQuotes(latexOut)
-                .replace(/\\"/g, '"')
-                // Giac's own latex() has a bug for squared trig functions: it emits e.g.
-                // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
-                // MathJax read it as the circumflex-accent command instead of a superscript.
-                // Drop that backslash so "\^{" renders as the intended "^{".
-                .replace(/\\\^\{/g, '^{'),
+  return fixMathrmProseText(
+    fixNegatedSqrtParens(
+      fixDifferentialD(
+        fixPauSymbol(
+          fixImaginaryUnit(
+            fixEulerConstant(
+              fixScientificNotation(
+                stripQuotes(latexOut)
+                  .replace(/\\"/g, '"')
+                  // Giac's own latex() has a bug for squared trig functions: it emits e.g.
+                  // "\cos\^{2}\left(...\right)" where the stray backslash before "^" makes
+                  // MathJax read it as the circumflex-accent command instead of a superscript.
+                  // Drop that backslash so "\^{" renders as the intended "^{".
+                  .replace(/\\\^\{/g, '^{'),
+              ),
             ),
           ),
         ),
