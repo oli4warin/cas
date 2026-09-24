@@ -1312,7 +1312,7 @@ export function mountApp(root) {
     // which drops the selection the moment typing resumes).
     if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
       const entry = state.history[step.idx];
-      const plotSpec = step.part === 'input' ? plottableInputForEntry(entry) : plottableOutputForEntry(entry);
+      const plotSpec = step.part === 'input' ? plottableInputForEntry(entry, state.definitions) : plottableOutputForEntry(entry);
       if (plotSpec) {
         e.preventDefault();
         addExpressionToPlot(plotSpec);
@@ -1515,6 +1515,7 @@ export function mountApp(root) {
     diffeq: (r) => !r.exprDE.trim(),
     distribution: () => false,
     scatter: (r) => !r.exprX.trim() && !r.exprY.trim(),
+    system: (r) => !r.exprSystem.trim(),
   };
   function applyPlotSpec(rows, { mode, patch }) {
     const isBlank = PLOT_SPEC_BLANK[mode];

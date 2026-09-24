@@ -21,8 +21,13 @@ import { collectFreeVariables, expandKnownFunctionCalls } from './giac.js';
 // distribution gets no sliders either - its parameters (mu/sigma, n/p, ...) are already their
 // own dedicated fields (see lib/plotRows.js's `params`/lib/distributionParams.js), not free
 // variables detected from expression text.
-const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [], diffeq: [], distribution: [] };
-const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [], diffeq: [], distribution: [] };
+//
+// system gets no sliders either, and deliberately so: unlike every other mode, a system row's
+// own lib/plotSystem.js validation already rejects any name besides x/y outright (a plain,
+// user-facing error rather than a slider offer) - see its own module comment for why a
+// "system of equations in x and y" is meant to stay exactly that.
+const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [], diffeq: [], distribution: [], system: ['x', 'y'] };
+const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [], diffeq: [], distribution: [], system: [] };
 
 const DEFAULT_SLIDER = { value: 1, min: -10, max: 10, step: 0.1 };
 

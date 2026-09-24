@@ -130,6 +130,16 @@
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
+.plot-row__systemInput {
+  resize: vertical;
+  min-height: 26px;
+  line-height: 1.4;
+}
+
+.plot-row__field--system {
+  align-items: flex-start;
+}
+
 .plot-row__modeSelect {
   flex: 0 0 auto;
   font-family: var(--mono);

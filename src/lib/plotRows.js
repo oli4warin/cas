@@ -28,12 +28,14 @@ let nextRowId = 1;
 export function makeRow() {
   return {
     id: nextRowId++,
-    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq' | 'distribution'
+    mode: 'function', // 'function' | 'parametric' | 'complex' | 'scatter' | 'diffeq' | 'distribution' | 'system'
     expr: '',
     exprX: '',
     exprY: '',
     exprZ: '',
     exprDE: '',
+    exprSystem: '', // 'system' row: one equation/inequality per line, in x and y only - see lib/plotSystem.js
+
     tmin: DEFAULT_TMIN,
     tmax: DEFAULT_TMAX,
     family: DEFAULT_DISTRIBUTION_FAMILY,

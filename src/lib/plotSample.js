@@ -8,6 +8,7 @@ import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js'
 import { substitutePlotParams } from './plotParams.js';
 import { parseDiffEq, buildFieldComponents } from './plotDiffEq.js';
 import { distributionDomainExpr, DISTRIBUTION_FAMILIES, resolveDistributionCdfPlan } from './distributionParams.js';
+import { parseSystemLines, traceContourSegments, orientForHolds, combineInequalityGrids, buildRegionFillPolygons } from './plotSystem.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -251,6 +252,94 @@ export function parseFieldList(raw) {
     const [xTok = '', yTok = '', dxTok = '', dyTok = ''] = splitTopLevel(t.slice(1, -1));
     return { x: parseOne(xTok), y: parseOne(yTok), dx: parseOne(dxTok), dy: parseOne(dyTok) };
   });
+}
+
+// Same grid-batching idea as buildFieldSampleExpr, but for a single scalar value per corner
+// (an equation/inequality's own lhs-rhs, see sampleSystem below) instead of a 2-component
+// vector. Unlike buildFieldSampleExpr's arrows, gx/gy aren't echoed back in the output - the
+// caller already knows exactly which (gx,gy) each flat index k decodes to, since it built nx/ny
+// itself - so this only costs one evaluation per grid point, not the field's four.
+export function buildScalarGridExpr(expr, xmin, xmax, ymin, ymax, nx, ny) {
+  const nX = Math.max(2, Math.floor(nx));
+  const nY = Math.max(2, Math.floor(ny));
+  const stepX = (xmax - xmin) / (nX - 1);
+  const stepY = (ymax - ymin) / (nY - 1);
+  const gxAt = `(${formatNum(xmin)})+(iquo(k,${nY}))*(${formatNum(stepX)})`;
+  const gyAt = `(${formatNum(ymin)})+(irem(k,${nY}))*(${formatNum(stepY)})`;
+  const n = nX * nY;
+  return `evalf(seq(subst(subst((${expr}),x=(${gxAt})),y=(${gyAt})),k,0,${n - 1}))`;
+}
+
+// Samples every line of a 'system' row's text (see lib/plotSystem.js's parseSystemLines) over
+// `view` on an nx-by-ny grid: each equation's lhs-rhs is traced into contour segments
+// (traceContourSegments); every inequality's own *oriented* lhs-rhs (see orientForHolds) is
+// kept as its own grid and, once every line's been sampled, combined into one merged
+// "solution region" (combineInequalityGrids, then buildRegionFillPolygons for its fill and
+// traceContourSegments again for its own boundary) - the system's actual feasible region (every
+// inequality holding at once), not each inequality's own half-plane shown separately. Only
+// when there are at least two equations (a lone equation has a whole curve of solutions, not
+// isolated points - a determined system needs as many equations as unknowns) are the equations
+// alone (never the inequalities - there's no single numeric point to solve a region down to)
+// solved together for their real numeric intersection point(s). Sequential engine round trips
+// throughout - one per line, plus (when applicable) one more for the solve - same reason
+// sampleScatter's two calls are (the shared bridge only ever resolves one dependent step of a
+// caller's own at a time). Propagates parseSystemLines' own Error for a line that isn't a
+// relation in x/y at all, same as every other mode's own validation.
+export async function sampleSystem(evaluateRaw, text, view, nx, ny, definitions) {
+  const lines = parseSystemLines(text, definitions);
+  if (lines.length === 0) return { equations: [], inequalityRegion: null, solutionPoints: [] };
+
+  const { xmin, xmax, ymin, ymax } = view;
+  const nX = Math.max(2, Math.floor(nx));
+  const nY = Math.max(2, Math.floor(ny));
+
+  const equations = [];
+  const orientedInequalityGrids = [];
+  for (const line of lines) {
+    const fExpr = `(${line.lhs})-(${line.rhs})`;
+    const out = await evaluateRaw(buildScalarGridExpr(fExpr, xmin, xmax, ymin, ymax, nX, nY));
+    if (out.startsWith('GIAC_ERROR')) throw new Error(out.slice(11).trim() || `Could not evaluate "${line.raw}".`);
+    const values = parseSampleList(out);
+    if (!values) throw new Error('Unexpected response from the CAS engine.');
+
+    const grid = [];
+    for (let i = 0; i < nX; i++) grid.push(values.slice(i * nY, i * nY + nY));
+
+    if (line.kind === 'equation') {
+      equations.push(traceContourSegments(grid, xmin, xmax, ymin, ymax, nX, nY));
+    } else {
+      orientedInequalityGrids.push(grid.map((col) => col.map((v) => orientForHolds(line.op, v))));
+    }
+  }
+
+  let inequalityRegion = null;
+  if (orientedInequalityGrids.length > 0) {
+    const combined = combineInequalityGrids(orientedInequalityGrids, nX, nY);
+    inequalityRegion = {
+      fill: buildRegionFillPolygons(combined, xmin, xmax, ymin, ymax, nX, nY),
+      boundary: traceContourSegments(combined, xmin, xmax, ymin, ymax, nX, nY),
+    };
+  }
+
+  const equationLines = lines.filter((l) => l.kind === 'equation');
+  let solutionPoints = [];
+  if (equationLines.length >= 2) {
+    const eqText = equationLines.map((l) => `${l.lhs}=${l.rhs}`).join(' and ');
+    const out = await evaluateRaw(`evalf(solve(${eqText},[x,y]))`);
+    if (!out.startsWith('GIAC_ERROR')) {
+      // solve()'s own "list[[...],...]" wrapper (see plotSample.js's own parseSolveList, and
+      // parseSystemSolutionPoints's use of it) - stripping just the "list" prefix leaves
+      // exactly the "[[x,y],...]" shape parseParametricList already knows how to read (an
+      // empty "[]" - no real solutions - parses to an empty array the same way). A symbolic,
+      // non-numeric coordinate (an under-determined system - e.g. two lines that reduce to
+      // the same equation) is dropped rather than plotted as a bogus point.
+      const trimmed = out.trim();
+      const body = trimmed.startsWith('list[') ? trimmed.slice(4) : trimmed;
+      solutionPoints = (parseParametricList(body) ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    }
+  }
+
+  return { equations, inequalityRegion, solutionPoints };
 }
 
 // Samples a differential-equation row's vector field over `view` on an nx-by-ny grid: asks

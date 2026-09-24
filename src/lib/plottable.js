@@ -11,8 +11,9 @@ import { parseDefinition } from './definitions.js';
 import { isPlottableInX, reinsertableValue, parseRegressionCall } from './giac.js';
 import { parseDiffEq } from './plotDiffEq.js';
 import { parseDistributionCdfCall } from './distributionParams.js';
+import { parseSystemLines } from './plotSystem.js';
 
-// Four shapes count as plottable from an entry's *input*: a function this session just
+// Five shapes count as plottable from an entry's *input*: a function this session just
 // defined with exactly one parameter (f(x):=..., or even f(t):=... - calling it back as
 // "f(x)" always comes out as an expression in x regardless of what the definition itself calls
 // its own parameter, since Giac substitutes whatever's actually passed), a differential
@@ -26,13 +27,23 @@ import { parseDistributionCdfCall } from './distributionParams.js';
 // (xExpr,yExpr) data itself as a scatter plot, plus the already-fitted curve this same entry's
 // output computed (entry.raw - the plain formula, since evaluateRegression in giac.js never
 // wraps it as "y=...") as an ordinary function - so one click/keypress shows the fit next to
-// the data it was fit to. Checked one line at a time so a multi-line initial-value problem (the
-// ODE on one line, "y(0)=3" on the next - see wrapBareEquation in giac.js) still finds the ODE
-// line; a line that isn't shaped like any of these (no derivative, or a 3rd-order+ one) just
-// falls through to the next. Returns `{mode, patch}` (or an array of those, for regression)
-// ready to spread onto the plot panel's row shape, or null if nothing in this input is
-// offerable this way.
-export function plottableInputForEntry(entry) {
+// the data it was fit to - or a system of one or more equations/inequalities in x and y (see
+// lib/plotSystem.js's parseSystemLines - the same "one per line, x/y only" shape the plot
+// panel's own 'system' row takes), offered as that whole system verbatim, line breaks and all
+// (the 'system' row's sampling re-parses it the exact same way, and traces/shades/solves it -
+// see lib/plotSample.js's sampleSystem). Checked one line at a time so a multi-line
+// initial-value problem (the ODE on one line, "y(0)=3" on the next - see wrapBareEquation in
+// giac.js) still finds the ODE line; a line that isn't shaped like any of these (no derivative,
+// or a 3rd-order+ one) just falls through to the next. The system check runs last and over the
+// *whole* input at once (not per line) since it needs every line to qualify together, not just
+// one - it's only reached once every line has already failed both the distribution and diffeq
+// checks, so a real differential equation or `_cdf` call is never mistaken for one more
+// "equation in x/y" line. Returns `{mode, patch}` (or an array of those, for regression) ready
+// to spread onto the plot panel's row shape, or null if nothing in this input is offerable this
+// way. `definitions` (the session's own assigned names) is only used for the system check - see
+// parseSystemLine's own reasoning for why an already-assigned name doesn't disqualify a line the
+// way a genuinely free one does.
+export function plottableInputForEntry(entry, definitions = new Map()) {
   if (!entry || entry.isError) return null;
 
   const def = parseDefinition(entry.input);
@@ -62,6 +73,15 @@ export function plottableInputForEntry(entry) {
       // Not itself a 1st-/2nd-order equation in y (e.g. an initial condition like "y(0)=3"
       // sitting on its own line alongside the actual ODE) - keep looking.
     }
+  }
+
+  try {
+    if (parseSystemLines(entry.input, definitions).length > 0) {
+      return { mode: 'system', patch: { exprSystem: entry.input } };
+    }
+  } catch {
+    // Not a system of equations/inequalities in x and y either (some other command entirely,
+    // or one naming a variable besides x/y) - nothing left to offer.
   }
   return null;
 }

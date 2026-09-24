@@ -7,6 +7,7 @@ import {
   sampleComplex,
   sampleScatter,
   sampleDiffEqField,
+  sampleSystem,
   sampleContinuousDistribution,
   sampleDiscreteDistribution,
   resolveDistributionBounds,
@@ -24,11 +25,29 @@ const SAMPLE_DEBOUNCE_MS = 150;
 // draw() below) - low enough that the grid lines and curve stroke underneath/on top still
 // read clearly through the fill.
 const DISTRIBUTION_FILL_OPACITY = 0.35;
+// Opacity for a system row's shaded inequality region (see the 'system' curve style below) -
+// the exact value asked for, distinct from DISTRIBUTION_FILL_OPACITY since a system row can
+// stack several inequalities' fills on top of each other (deliberately: their overlap reading
+// darker is how the combined feasible region shows through).
+const SYSTEM_FILL_OPACITY = 0.3;
 
 // A row's curve color: whatever the user picked manually, or - same as before that was
 // possible - the palette color for its position.
 function rowColor(row, index) {
   return row.color || COLORS[index % COLORS.length];
+}
+
+// A system row's own preview text: every non-blank line joined with "and" into one line
+// ("x>5 and y>-x+4") and run through giacToLatex as a single expression - giacToLatex already
+// renders "and" as a spaced-out \text{and} between its operands (see LOGICAL_WORDS in
+// lib/giacToLatex.js), which is exactly the right reading here since that's also how the rows
+// actually get combined for solve()/the merged region (see sampleSystem in lib/plotSample.js).
+function systemPreviewLatex(text) {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length ? giacToLatex(lines.join(' and ')) || '' : '';
 }
 
 // The text fields a row has, in the order you'd naturally tab through them - used both to
@@ -38,6 +57,7 @@ function fieldOrder(row) {
   if (row.mode === 'complex') return ['exprZ'];
   if (row.mode === 'diffeq') return ['exprDE'];
   if (row.mode === 'parametric' || row.mode === 'scatter') return ['exprX', 'exprY'];
+  if (row.mode === 'system') return ['exprSystem'];
   // No ordinary text field to Enter-tab through here - the family <select> and its param/bound
   // inputs are all rendered by buildFields('distribution') below and wired directly, rather
   // than through the field-order/makeField machinery the other modes share.
@@ -165,7 +185,79 @@ function draw(canvas, rawView, curves, aspectLocked) {
   }
 
   for (const curve of curves) {
-    if (!curve.visible || !curve.points || curve.points.length === 0) continue;
+    if (!curve.visible || !curve.points) continue;
+
+    // A system row's `points` isn't a flat array like every other style's - it's the compound
+    // {equations, inequalityRegion, solutionPoints} shape sampleSystem (plotSample.js)
+    // returns, so it's handled entirely on its own here rather than falling into the
+    // array-shaped styles below (whose own `curve.points.length === 0` guard just below would
+    // always be true for it, since a plain object has no .length).
+    if (curve.style === 'system') {
+      const { equations = [], inequalityRegion = null, solutionPoints = [] } = curve.points;
+
+      // The system's *combined* feasible region (every inequality holding at once - see
+      // combineInequalityGrids in lib/plotSystem.js, which is what makes this one merged shape
+      // rather than each inequality's own half-plane overlapping the others), drawn first so
+      // the equations' curves and the system's solution points both sit visibly on top of it.
+      // Every polygon is added to one single path and filled once (rather than one fill() per
+      // polygon) so neighboring cells' shared edges never double up their own antialiasing -
+      // that seam is what made the old per-cell fillRect version look "pixelig" up close. The
+      // region's own boundary is then stroked at full opacity right on top of the fill, so the
+      // solution area actually reads as a bounded region rather than just a haze.
+      if (inequalityRegion && inequalityRegion.fill.length) {
+        ctx.fillStyle = hexToRgba(curve.color, SYSTEM_FILL_OPACITY);
+        ctx.beginPath();
+        for (const poly of inequalityRegion.fill) {
+          if (poly.length < 3) continue;
+          ctx.moveTo(toPx(poly[0].x), toPy(poly[0].y));
+          for (let k = 1; k < poly.length; k++) ctx.lineTo(toPx(poly[k].x), toPy(poly[k].y));
+          ctx.closePath();
+        }
+        ctx.fill();
+
+        if (inequalityRegion.boundary.length) {
+          ctx.strokeStyle = curve.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          for (const [a, b] of inequalityRegion.boundary) {
+            ctx.moveTo(toPx(a.x), toPy(a.y));
+            ctx.lineTo(toPx(b.x), toPy(b.y));
+          }
+          ctx.stroke();
+        }
+      }
+
+      // Each equation's own implicit-curve contour (marching squares - see
+      // traceContourSegments in lib/plotSystem.js), one independent set of segments per line
+      // so a gap in one equation's domain never bridges into another's.
+      if (equations.length) {
+        ctx.strokeStyle = curve.color;
+        ctx.lineWidth = 2;
+        for (const segments of equations) {
+          ctx.beginPath();
+          for (const [a, b] of segments) {
+            ctx.moveTo(toPx(a.x), toPy(a.y));
+            ctx.lineTo(toPx(b.x), toPy(b.y));
+          }
+          ctx.stroke();
+        }
+      }
+
+      // The system's own solution point(s) - only ever populated when there are 2+ equation
+      // lines (see sampleSystem) - drawn last, on top of both the curves and the fills.
+      if (solutionPoints.length) {
+        ctx.fillStyle = curve.color;
+        for (const { x, y } of solutionPoints) {
+          if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
+          ctx.beginPath();
+          ctx.arc(toPx(x), toPy(y), 4.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      continue;
+    }
+
+    if (curve.points.length === 0) continue;
 
     if (curve.style === 'points') {
       ctx.fillStyle = curve.color;
@@ -355,6 +447,7 @@ function createRowView({
     h('option', { value: 'scatter' }, 'scatter (x,y) data'),
     h('option', { value: 'diffeq' }, 'differential equation'),
     h('option', { value: 'distribution' }, 'probability distribution'),
+    h('option', { value: 'system' }, 'system of equations (x,y)'),
   );
   const fieldsWrap = h('span');
   const toggleBtn = h('button', { type: 'button', class: 'plot-row__toggle', onclick: onToggle }, '●');
@@ -379,6 +472,34 @@ function createRowView({
     const preview = FormulaPreview({ className: 'plot-row__preview', placeholder: previewPlaceholder });
     previews[field] = preview;
     return h('span', { class: 'plot-row__field' }, input, preview.root);
+  }
+
+  // Same idea as makeField above, but a <textarea> so a system of several equations/
+  // inequalities can be typed one per line (see lib/plotSystem.js) - Shift+Enter inserts a
+  // literal newline here instead of tabbing to the next field/row, the same convention the
+  // main calculator input uses for its own multiline systems (see app.js), so typing one is
+  // the same gesture in both places. Its preview (see update() below, systemPreviewLatex)
+  // joins every line with "and" into one line - "x>5 and y>-x+4" - rather than stacking them,
+  // since that's how the system is actually evaluated (every line already gets "and"-joined
+  // the same way for solve()/the combined region, see sampleSystem in lib/plotSample.js) and
+  // reads more naturally for a run of inequalities than a bare vertical stack with no
+  // connecting word would.
+  function makeMultilineField(field, placeholder) {
+    const input = h('textarea', {
+      class: 'plot-row__input plot-row__systemInput',
+      rows: 3,
+      placeholder,
+      onfocus: () => onFieldFocus(field),
+      oninput: (e) => onFieldInput(field, e.target.value),
+      onkeydown: (e) => {
+        if (e.key === 'Enter' && e.shiftKey) return;
+        onFieldKeyDown(e, field);
+      },
+    });
+    fieldEls[field] = input;
+    const preview = FormulaPreview({ className: 'plot-row__preview', placeholder: 'system preview' });
+    previews[field] = preview;
+    return h('span', { class: 'plot-row__field plot-row__field--system' }, input, preview.root);
   }
 
   function makeTRange() {
@@ -484,6 +605,13 @@ function createRowView({
         "1st order (y'=...): direction field over the x/y axes. " +
         "2nd order (y''=...): phase-plane vector field over y/y' instead (autonomous equations only).";
       fieldsWrap.append(field);
+    } else if (mode === 'system') {
+      const field = makeMultilineField('exprSystem', 'x+y=5\nx-y=1\ny<3');
+      field.title =
+        'One equation or inequality per line, in x and y only - Shift+Enter for a new line. ' +
+        'Equations are traced as curves and (with 2+ of them) solved for their intersection ' +
+        'point(s); inequalities are shaded at 30% opacity.';
+      fieldsWrap.append(field);
     } else {
       fieldsWrap.append(makeField('expr', 'e.g. sin(x), f(x), a*x+b, sin(x)|0<x<7', undefined));
     }
@@ -555,7 +683,9 @@ function createRowView({
     }
     for (const field of fieldOrder(row)) {
       if (fieldEls[field] && fieldEls[field].value !== row[field]) fieldEls[field].value = row[field];
-      previews[field]?.update(giacToLatex(row[field]) || '');
+      // A system row's field holds several lines at once - preview them "and"-joined into one
+      // line (see systemPreviewLatex) rather than as one run-on expression.
+      previews[field]?.update(row.mode === 'system' ? systemPreviewLatex(row[field]) : giacToLatex(row[field]) || '');
     }
     if (tminEl && tminEl.value !== row.tmin) tminEl.value = row.tmin;
     if (tmaxEl && tmaxEl.value !== row.tmax) tmaxEl.value = row.tmax;
@@ -975,6 +1105,12 @@ export function PlotPanel({
       const isDistribution = row.mode === 'distribution';
       const discrete = isDistribution && DISTRIBUTION_FAMILIES[row.family]?.discrete;
       const stored = curves[row.id];
+      if (row.mode === 'system') {
+        // stored.points is here the compound {equations, inequalityRegion, solutionPoints}
+        // shape sampleSystem returns, not a flat array - see draw()'s own 'system' style,
+        // which is the only one that ever reads it.
+        return { id: row.id, color: rowColor(row, i), visible: row.visible, points: stored?.points, style: 'system' };
+      }
       return {
         id: row.id,
         color: rowColor(row, i),
@@ -1026,6 +1162,14 @@ export function PlotPanel({
     // as a flow, without so many arrows they blur into a solid smear.
     const fieldNx = Math.max(10, Math.min(40, Math.round(width / 32)));
     const fieldNy = Math.max(8, Math.min(30, Math.round(height / 32)));
+    // Denser than the vector field above - a system row's grid has to resolve both a smooth
+    // implicit-curve contour (marching squares - see traceContourSegments in lib/plotSystem.js)
+    // and an inequality's own region fill (buildRegionFillPolygons already interpolates each
+    // cell's own boundary sub-pixel-precisely, but a curved boundary like a circle still reads
+    // faceted at too coarse a grid - this resolution is chosen to keep that unnoticeable at a
+    // typical zoom level without costing more than roughly half a second per line).
+    const sysNx = Math.max(70, Math.min(180, Math.round(width / 3.5)));
+    const sysNy = Math.max(50, Math.min(130, Math.round(height / 3.5)));
 
     for (const row of rows) {
       const applyResult = (pts) => {
@@ -1065,6 +1209,12 @@ export function PlotPanel({
           continue;
         }
         sampleDiffEqField(evaluateRaw, row.exprDE, effView, fieldNx, fieldNy).then(applyResult, applyError);
+      } else if (row.mode === 'system') {
+        if (!row.exprSystem.trim()) {
+          delete curves[row.id];
+          continue;
+        }
+        sampleSystem(evaluateRaw, row.exprSystem, effView, sysNx, sysNy, definitions).then(applyResult, applyError);
       } else if (row.mode === 'distribution') {
         const cfg = DISTRIBUTION_FAMILIES[row.family];
         if (!cfg) {

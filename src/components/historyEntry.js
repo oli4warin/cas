@@ -1,6 +1,6 @@
 import { h } from '../lib/dom.js';
 import { typesetNode } from '../lib/mathjax.js';
-import { giacToLatex } from '../lib/giacToLatex.js';
+import { linesToGatheredLatex } from '../lib/giacToLatex.js';
 import { reinsertableValue } from '../lib/giac.js';
 import { plottableInputForEntry, plottableOutputForEntry } from '../lib/plottable.js';
 import { saveableForEntry } from '../lib/saveable.js';
@@ -19,14 +19,16 @@ import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 // { quickExpr } (a solve() result, saved outright) or { defaultName, value } (anything else,
 // opens the naming menu - see components/saveMenu.js) - see handleSaveEntry/app.js, which
 // decides between the two.
-// `definitions` is read fresh on every
-// call (App's current session state, not frozen at the time this entry was created) purely to
-// decide how a list-index alias in `entry.input` displays (see displayListIndexAliases) - it
-// never affects anything already computed (entry.text/latex/raw are exactly what evaluate()
-// returned). `showText` is read fresh on every render() call too (App owns that as global UI
-// state).
+// `definitions` is read fresh on every call (App's current session state, not frozen at the
+// time this entry was created) for two things: deciding how a list-index alias in
+// `entry.input` displays (see displayListIndexAliases), and - passed straight through to
+// plottableInputForEntry - telling an already-assigned name apart from a genuinely free one
+// when checking if this input is a system of equations/inequalities in x/y (see
+// lib/plotSystem.js). Neither affects anything already computed (entry.text/latex/raw are
+// exactly what evaluate() returned). `showText` is read fresh on every render() call too (App
+// owns that as global UI state).
 export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave, definitions }) {
-  const inputPlotSpec = plottableInputForEntry(entry);
+  const inputPlotSpec = plottableInputForEntry(entry, definitions);
   const outputPlotSpec = plottableOutputForEntry(entry);
   const saveInfo = saveableForEntry(entry);
   let copiedTimeout = null;
@@ -84,7 +86,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     if (!spec) btn.style.display = 'none';
     return btn;
   }
-  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function/distribution/regression');
+  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function/distribution/regression/system');
   const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result');
 
   const inputRow = h(
@@ -163,13 +165,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   // rather than joining lines into running text - if any single line fails to convert, the
   // whole thing falls back to plain text together, same as a single line already does.
   const inputLines = entry.input.split('\n').map((line) => displayListIndexAliases(line, definitions));
-  const inputLatex =
-    inputLines.length === 1
-      ? giacToLatex(inputLines[0]) || ''
-      : (() => {
-          const rendered = inputLines.map((line) => giacToLatex(line));
-          return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : '';
-        })();
+  const inputLatex = linesToGatheredLatex(inputLines);
   if (inputLatex) {
     inputMath.textContent = '\\[' + inputLatex + '\\]';
     inputMath.style.display = '';

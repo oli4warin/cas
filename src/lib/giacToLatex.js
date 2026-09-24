@@ -494,3 +494,15 @@ export function giacToLatex(src) {
     return null;
   }
 }
+
+// Renders several already-split lines (e.g. a system of equations typed one per line - see
+// historyEntry.js's own input rendering and the plot panel's 'system' row) as one LaTeX
+// string: a single line just gets giacToLatex's own single-expression rendering, but two or
+// more are stacked in a `gathered` block rather than joined into running text, so each keeps
+// its own line the way it was typed. Falls back to '' (not a partial render) if any single
+// line fails to convert, same as giacToLatex itself does for its blank/error case.
+export function linesToGatheredLatex(lines) {
+  if (lines.length === 1) return giacToLatex(lines[0]) || '';
+  const rendered = lines.map((line) => giacToLatex(line));
+  return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : '';
+}
