@@ -1885,6 +1885,144 @@ async function fetchLatex(out) {
   );
 }
 
+// Recognizes a top-level normald_cdf(...) call (the canonical name normcdf/normalcdf/
+// normal_cdf are all rewritten to by normalizeAliasCommands before sentExpr is built) and
+// returns its {mean, stddev, lower, upper} argument text, or null if `sentExpr` isn't shaped
+// like one. Giac accepts either normald_cdf(mean,stddev,x) - a plain "<= x" cdf - or
+// normald_cdf(mean,stddev,x1,x2) - a two-sided "x1 <= ... <= x2" probability; the 3-arg form
+// is treated as the 4-arg form with "-infinity" as its lower bound (see
+// formatNormalCdfResult), since both express the same "up to x" probability.
+function parseNormalCdfCall(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  if (!/^normald_cdf\(/i.test(body) || !body.endsWith(')')) return null;
+  const openIdx = body.indexOf('(');
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',').map((a) => a.trim());
+  if (args.length === 3) return { mean: args[0], stddev: args[1], lower: '-infinity', upper: args[2] };
+  if (args.length === 4) return { mean: args[0], stddev: args[1], lower: args[2], upper: args[3] };
+  return null;
+}
+
+// True when `s` is Giac's own (positive) infinity token, in either spelling - used below to
+// recognize an unbounded normald_cdf() side and drop that side's relation instead of trying
+// to render "\le \infty" literally. `isNegativeInfinityToken` mirrors it for the lower bound.
+function isPositiveInfinityToken(s) {
+  return /^\+?(infinity|inf)$/i.test(s.trim());
+}
+function isNegativeInfinityToken(s) {
+  return /^-(infinity|inf)$/i.test(s.trim());
+}
+
+// Builds the {text, latex} pair for a normald_cdf(...) result (see parseNormalCdfCall) -
+// `displayValue`/`isExact` come from evaluateNormalCdf below, which decides whether the
+// probability happens to be an exact, terminating value (e.g. 0.5 by symmetry, or 0 for a
+// single point) worth an "=" rather than "≈" (mirrors exactNumberResult's own such-vs-rounded
+// distinction). Relabels the bare number as "P(a <= N(mean,stddev) <= b) ≈ <value>", dropping
+// whichever side is unbounded (see isPositiveInfinityToken/isNegativeInfinityToken) down to
+// "P(N(mean,stddev) <= b)" or "P(N(mean,stddev) >= a)". Returns null (falling back to the
+// plain decimal) when both bounds are unbounded (nothing meaningful left to label) or any
+// argument fails to latex().
+function formatNormalCdfResult(displayValue, isExact, parsed) {
+  const { mean, stddev, lower, upper } = parsed;
+  const lowerInf = isNegativeInfinityToken(lower);
+  const upperInf = isPositiveInfinityToken(upper);
+  if (lowerInf && upperInf) return null;
+
+  const meanLatex = giacToLatex(mean);
+  const stddevLatex = giacToLatex(stddev);
+  if (meanLatex == null || stddevLatex == null) return null;
+  const distLatex = `\\mathcal{N}(${meanLatex},\\,${stddevLatex})`;
+  const distText = `N(${mean},${stddev})`;
+
+  let bodyLatex;
+  let bodyText;
+  if (lowerInf) {
+    const upperLatex = giacToLatex(upper);
+    if (upperLatex == null) return null;
+    bodyLatex = `${distLatex} \\le ${upperLatex}`;
+    bodyText = `${distText}≤${upper}`;
+  } else if (upperInf) {
+    const lowerLatex = giacToLatex(lower);
+    if (lowerLatex == null) return null;
+    bodyLatex = `${distLatex} \\ge ${lowerLatex}`;
+    bodyText = `${distText}≥${lower}`;
+  } else {
+    const lowerLatex = giacToLatex(lower);
+    const upperLatex = giacToLatex(upper);
+    if (lowerLatex == null || upperLatex == null) return null;
+    bodyLatex = `${lowerLatex} \\le ${distLatex} \\le ${upperLatex}`;
+    bodyText = `${lower}≤${distText}≤${upper}`;
+  }
+
+  const sci = formatApproxSci(displayValue);
+  const exact = isExact && !sci?.rounded;
+  return {
+    text: `P(${bodyText})${exact ? '=' : '≈'}${displayValue}`,
+    latex: `\\mathrm{P}(${bodyLatex})${exact ? '=' : '\\approx'}${sci ? sci.latex : displayValue}`,
+  };
+}
+
+// Shared by evaluate() and evaluateApprox(): evaluates a normald_cdf(...) call (see
+// parseNormalCdfCall) as a plain decimal probability, regardless of the sheet's own exact/
+// approx mode (both would otherwise reach for normald_cdf's erf()-based exact form - see
+// formatNormalCdfResult for why that's avoided entirely, never just hidden after the fact).
+// The exact form is still computed once, quietly, purely to check whether it happens to
+// collapse to a plain rational (0.5 by symmetry, 0 at a single point, ...) worth an "="
+// instead of "≈" - it's discarded unread whenever it doesn't (e.g. it's erf()-based).
+// Returns the evaluate()-shaped result object, or null (meaning: `sentExpr` isn't a
+// normald_cdf() call, or the label couldn't be built) so the caller falls back to its own
+// generic path.
+//
+// Giac's own normald_cdf(mean,stddev,x,+infinity) - the 4-arg form with an infinite *upper*
+// bound - has an engine bug: it comes back "undef" instead of the correct one-sided tail
+// probability (confirmed against the actual engine, e.g. normald_cdf(0,1,0,infinity) should
+// be 0.5 but returns undef). The mirror-image case (a -infinity *lower* bound, or the native
+// 3-arg normald_cdf(mean,stddev,x) it's rewritten from - see parseNormalCdfCall) isn't
+// affected. Rewritten below as the complementary lower-tail probability
+// "1-normald_cdf(mean,stddev,x)", which only ever exercises the working path.
+function normalCdfEvalExpr({ mean, stddev, lower, upper }) {
+  if (isPositiveInfinityToken(upper) && !isNegativeInfinityToken(lower)) return `1-normald_cdf(${mean},${stddev},${lower})`;
+  return `normald_cdf(${mean},${stddev},${lower},${upper})`;
+}
+
+async function evaluateNormalCdf(normalCdfCall) {
+  if (!normalCdfCall) return null;
+  const giacExpr = normalCdfEvalExpr(normalCdfCall);
+  const cdfOut = stripTrailingSemicolon(await rawEvalAsync(`evalf(${giacExpr})`));
+  if (cdfOut.startsWith('GIAC_ERROR')) {
+    return { raw: cdfOut, isError: true, text: cdfOut.slice(11).trim(), latex: null, isGraphics: false };
+  }
+
+  let displayValue = cdfOut;
+  let isExact = false;
+  const exactOut = stripTrailingSemicolon(await rawEvalAsync(`exact(${giacExpr})`));
+  if (!exactOut.startsWith('GIAC_ERROR')) {
+    // Giac auto-appends its own "=<preview>" tail here exactly as it does everywhere else
+    // (see EXACT_DECIMAL_TAIL_RE/reinsertableValue above) - e.g. "1/2=0.5" - so that has to be
+    // stripped back off before parseExactRational ever sees it, or a genuinely exact 1/2
+    // result would wrongly fall through to the "≈" branch below.
+    const exactPart = reinsertableValue(exactOut);
+    const rational = parseExactRational(exactPart);
+    if (rational?.den === 1n) {
+      displayValue = exactPart;
+      isExact = true;
+    } else if (rational) {
+      const exactDecimal = terminatingDecimalString(rational.num, rational.den);
+      if (exactDecimal && sameNumericValue(exactDecimal, cdfOut)) {
+        displayValue = exactDecimal;
+        isExact = true;
+      }
+    }
+  }
+
+  const formatted = formatNormalCdfResult(displayValue, isExact, normalCdfCall);
+  if (!formatted) return null;
+  // `raw` matches whichever value is actually shown (see formatNormalCdfResult), so copying
+  // the result (see historyEntry.js/the "s" save-key hint) reinserts just that number.
+  return { raw: displayValue, isError: false, text: formatted.text, latex: formatted.latex, isGraphics: false };
+}
+
 // Evaluate one line of Xcas input. Returns a promise for:
 //   { raw, isError, text, latex, isGraphics }
 // - raw: the string Giac returned, untouched - except a single-solution solve() result,
@@ -1898,6 +2036,14 @@ export async function evaluate(expr, definitions) {
   const sentExpr = normalizePowerCalls(
     normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
   );
+
+  // normald_cdf's *exact* answer is an erf()-based expression - correct, but far more
+  // confusing to students than the decimal probability they're actually after (see
+  // evaluateNormalCdf) - so this is short-circuited ahead of the generic eval below,
+  // regardless of the sheet's own exact/approx mode.
+  const normalCdfResult = await evaluateNormalCdf(parseNormalCdfCall(sentExpr));
+  if (normalCdfResult) return normalCdfResult;
+
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
   if (out.startsWith('GIAC_ERROR')) {
@@ -2180,6 +2326,10 @@ export async function evaluateApprox(expr, definitions) {
   const normalized = normalizePowerCalls(
     normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
   );
+
+  // Same erf()-avoiding short-circuit as evaluate() above - see evaluateNormalCdf.
+  const normalCdfResult = await evaluateNormalCdf(parseNormalCdfCall(normalized));
+  if (normalCdfResult) return normalCdfResult;
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
