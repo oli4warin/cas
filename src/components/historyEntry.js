@@ -84,7 +84,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     if (!spec) btn.style.display = 'none';
     return btn;
   }
-  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function');
+  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function/distribution');
   const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result');
 
   const inputRow = h(

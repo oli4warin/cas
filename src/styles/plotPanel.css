@@ -193,6 +193,32 @@
   margin: 0 !important;
 }
 
+.plot-row__distParamLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.plot-row__distParam {
+  width: 64px;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  outline: none;
+}
+
+.plot-row__distParam:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
 .plot-row__tRange {
   flex: 0 0 auto;
   display: flex;

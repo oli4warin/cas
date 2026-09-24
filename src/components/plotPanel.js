@@ -1,9 +1,20 @@
 import { h, clear, reconcileOrder } from '../lib/dom.js';
 import { definitionLabel } from '../lib/definitions.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
-import { sampleFunction, sampleParametric, sampleComplex, sampleScatter, sampleDiffEqField } from '../lib/plotSample.js';
-import { DEFAULT_VIEW, makeRow } from '../lib/plotRows.js';
+import {
+  sampleFunction,
+  sampleParametric,
+  sampleComplex,
+  sampleScatter,
+  sampleDiffEqField,
+  sampleContinuousDistribution,
+  sampleDiscreteDistribution,
+  resolveDistributionBounds,
+  computeDistributionFitView,
+} from '../lib/plotSample.js';
+import { DEFAULT_VIEW, makeRow, defaultDistributionParams } from '../lib/plotRows.js';
 import { collectRowParams, reconcileSliders } from '../lib/plotParams.js';
+import { DISTRIBUTION_FAMILIES } from '../lib/distributionParams.js';
 import { FormulaPreview } from './formulaPreview.js';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
@@ -22,7 +33,21 @@ function fieldOrder(row) {
   if (row.mode === 'complex') return ['exprZ'];
   if (row.mode === 'diffeq') return ['exprDE'];
   if (row.mode === 'parametric' || row.mode === 'scatter') return ['exprX', 'exprY'];
+  // No ordinary text field to Enter-tab through here - the family <select> and its param/bound
+  // inputs are all rendered by buildFields('distribution') below and wired directly, rather
+  // than through the field-order/makeField machinery the other modes share.
+  if (row.mode === 'distribution') return [];
   return ['expr'];
+}
+
+// A hex color (as stored on a row/produced by COLORS above) plus an alpha, as an rgba() CSS
+// color string - used for the 50%-opacity area/bar fill under a distribution's density/pmf
+// (see the 'area'/'bars' curve styles in draw() below).
+function hexToRgba(hex, alpha) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const [, r, g, b] = m;
+  return `rgba(${parseInt(r, 16)},${parseInt(g, 16)},${parseInt(b, 16)},${alpha})`;
 }
 
 function niceStep(rawStep) {
@@ -192,6 +217,66 @@ function draw(canvas, rawView, curves, aspectLocked) {
       continue;
     }
 
+    if (curve.style === 'bars') {
+      // A discrete distribution's probability function - one bar per integer k, ~0.8 data
+      // units wide so neighboring bars read as separate columns with a visible gap between
+      // them. Every bar gets an outline in the row color; a bar whose k falls inside the
+      // shaded [lower,upper] region (see resolveDistributionBounds/resample()) is additionally
+      // filled at 50% opacity - a bar chart's own rectangle already reads as "the area", so no
+      // separate fill-vs-curve pass is needed the way the continuous 'area' style below needs.
+      const barHalfWidth = (0.4 * width) / (xmax - xmin);
+      const zeroPy = toPy(0);
+      ctx.strokeStyle = curve.color;
+      ctx.lineWidth = 1.5;
+      for (const { x, y, filled } of curve.points) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        if (x < xmin || x > xmax) continue;
+        const px = toPx(x);
+        const topPy = toPy(y);
+        const rectX = px - barHalfWidth;
+        const rectY = Math.min(topPy, zeroPy);
+        const rectW = barHalfWidth * 2;
+        const rectH = Math.abs(zeroPy - topPy);
+        if (filled) {
+          ctx.fillStyle = hexToRgba(curve.color, 0.5);
+          ctx.fillRect(rectX, rectY, rectW, rectH);
+        }
+        ctx.strokeRect(rectX, rectY, rectW, rectH);
+      }
+      continue;
+    }
+
+    if (curve.style === 'area' && curve.fillFrom != null && curve.fillTo != null) {
+      // The shaded region under a continuous distribution's density, for x in
+      // [fillFrom,fillTo] (already clamped to the drawn range and to the family's own support -
+      // see resample()'s distribution branch) - filled *underneath* the curve stroke drawn
+      // below, in separate sub-paths across any NaN gap (mirrors the stroke loop's own
+      // `started` handling), so a domain-masked gap never gets bridged by a fill.
+      ctx.fillStyle = hexToRgba(curve.color, 0.5);
+      const zeroPy = toPy(0);
+      let path = null;
+      const closePath = () => {
+        if (path && path.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(toPx(path[0].x), zeroPy);
+          for (const { x, y } of path) ctx.lineTo(toPx(x), toPy(y));
+          ctx.lineTo(toPx(path[path.length - 1].x), zeroPy);
+          ctx.closePath();
+          ctx.fill();
+        }
+        path = null;
+      };
+      for (const { x, y } of curve.points) {
+        const inRange = Number.isFinite(x) && Number.isFinite(y) && x >= curve.fillFrom && x <= curve.fillTo;
+        if (!inRange) {
+          closePath();
+          continue;
+        }
+        (path ??= []).push({ x, y });
+      }
+      closePath();
+    }
+
     ctx.strokeStyle = curve.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -230,6 +315,9 @@ function createRowView({
   onRemove,
   onSliderChange,
   onSliderRangeChange,
+  onFamilyChange,
+  onParamInput,
+  onBoundChange,
 }) {
   let currentMode = null;
   const fieldEls = {};
@@ -238,6 +326,12 @@ function createRowView({
   let tmaxEl = null;
   let sliderKey = null;
   const sliderEls = {}; // paramName -> { root, rangeEl, valueEl, minEl, maxEl }
+  let familySelectEl = null;
+  let paramsWrapEl = null;
+  let lowerEl = null;
+  let upperEl = null;
+  let paramFamilyKey = null; // which family paramEls was last built for - rebuilt only when this changes
+  const paramEls = {}; // paramKey -> input
 
   const swatch = h('input', {
     type: 'color',
@@ -253,6 +347,7 @@ function createRowView({
     h('option', { value: 'complex' }, 'z(t) complex'),
     h('option', { value: 'scatter' }, 'scatter (x,y) data'),
     h('option', { value: 'diffeq' }, 'differential equation'),
+    h('option', { value: 'distribution' }, 'probability distribution'),
   );
   const fieldsWrap = h('span');
   const toggleBtn = h('button', { type: 'button', class: 'plot-row__toggle', onclick: onToggle }, '●');
@@ -295,14 +390,73 @@ function createRowView({
     return h('span', { class: 'plot-row__tRange' }, 't:', tminEl, 'to', tmaxEl);
   }
 
+  // The family <select> plus its two always-present pieces (the params container, rebuilt
+  // only when the family itself changes - see updateDistParams - and the lower/upper bound
+  // inputs, which every family shares since they just shade whatever region of that family's
+  // own curve/bars falls between them).
+  function makeDistributionFields() {
+    familySelectEl = h(
+      'select',
+      { class: 'plot-row__modeSelect', title: 'Distribution', onchange: (e) => onFamilyChange(e.target.value) },
+      ...Object.entries(DISTRIBUTION_FAMILIES).map(([key, cfg]) => h('option', { value: key }, cfg.label)),
+    );
+    paramsWrapEl = h('span', { class: 'plot-row__paramFields' });
+    paramFamilyKey = null;
+    lowerEl = h('input', {
+      class: 'plot-row__tInput',
+      type: 'text',
+      placeholder: '-infinity',
+      oninput: (e) => onBoundChange('lower', e.target.value),
+    });
+    upperEl = h('input', {
+      class: 'plot-row__tInput',
+      type: 'text',
+      placeholder: 'infinity',
+      oninput: (e) => onBoundChange('upper', e.target.value),
+    });
+    const bounds = h('span', { class: 'plot-row__tRange' }, 'P(', lowerEl, '≤ X ≤', upperEl, ')');
+    return h('span', {}, familySelectEl, paramsWrapEl, bounds);
+  }
+
+  // Rebuilds the per-family param inputs only when `family` itself changed (same
+  // rebuild-only-on-key-change idea as updateSliders below) - a value tick (typing into an
+  // already-built field) never tears the inputs down and loses focus/caret position.
+  function updateDistParams(family, params) {
+    if (family !== paramFamilyKey) {
+      paramFamilyKey = family;
+      clear(paramsWrapEl);
+      for (const key of Object.keys(paramEls)) delete paramEls[key];
+      for (const p of DISTRIBUTION_FAMILIES[family]?.params ?? []) {
+        const input = h('input', {
+          class: 'plot-row__input plot-row__distParam',
+          type: 'text',
+          placeholder: p.label,
+          oninput: (e) => onParamInput(p.key, e.target.value),
+        });
+        paramEls[p.key] = input;
+        paramsWrapEl.append(h('label', { class: 'plot-row__distParamLabel' }, p.label, input));
+      }
+    }
+    for (const [key, input] of Object.entries(paramEls)) {
+      const value = params?.[key] ?? '';
+      if (input.value !== value) input.value = value;
+    }
+  }
+
   function buildFields(mode) {
     clear(fieldsWrap);
     for (const key of Object.keys(fieldEls)) delete fieldEls[key];
     for (const key of Object.keys(previews)) delete previews[key];
     tminEl = null;
     tmaxEl = null;
+    familySelectEl = null;
+    paramsWrapEl = null;
+    lowerEl = null;
+    upperEl = null;
 
-    if (mode === 'parametric') {
+    if (mode === 'distribution') {
+      fieldsWrap.append(makeDistributionFields());
+    } else if (mode === 'parametric') {
       fieldsWrap.append(makeField('exprX', 'x(t), e.g. cos(t)', 'x(t)'), makeField('exprY', 'y(t), e.g. sin(t)', 'y(t)'), makeTRange());
     } else if (mode === 'complex') {
       fieldsWrap.append(makeField('exprZ', 'z(t), e.g. exp(i*t)', 'z(t)'), makeTRange());
@@ -393,6 +547,13 @@ function createRowView({
     if (tminEl && tminEl.value !== row.tmin) tminEl.value = row.tmin;
     if (tmaxEl && tmaxEl.value !== row.tmax) tmaxEl.value = row.tmax;
 
+    if (familySelectEl) {
+      if (familySelectEl.value !== row.family) familySelectEl.value = row.family;
+      updateDistParams(row.family, row.params);
+      if (lowerEl.value !== row.lower) lowerEl.value = row.lower;
+      if (upperEl.value !== row.upper) upperEl.value = row.upper;
+    }
+
     updateSliders(row.sliders ?? {});
 
     toggleBtn.textContent = row.visible ? '●' : '○';
@@ -436,6 +597,12 @@ export function PlotPanel({
   let dragState = null;
   const rowViews = new Map(); // rowId -> RowView
   let pendingFocusRowId = null;
+  // rowId -> "family|JSON(params)" already fitted (see fitDistributionView) - lets
+  // renderRows() below tell "the user edited this row's shape" apart from every other reason
+  // it re-renders (typing elsewhere, a slider drag, toggling visibility, ...), so the view
+  // only auto-adjusts when there's actually something new to fit.
+  const distFitSignatures = new Map();
+  let distFitTimer = null;
 
   const statusEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' }, 'Reconnecting to calculator…');
   statusEl.style.display = 'none';
@@ -481,12 +648,15 @@ export function PlotPanel({
     { type: 'button', class: 'plot-panel__aspectBtn plot-panel__aspectBtn--active', title: 'Equidistant units (click for independent x/y scaling)' },
     '1:1',
   );
-  aspectBtn.addEventListener('click', () => {
-    aspectLocked = !aspectLocked;
+  function setAspectLocked(value) {
+    aspectLocked = value;
     aspectBtn.classList.toggle('plot-panel__aspectBtn--active', aspectLocked);
     aspectBtn.title = aspectLocked
       ? 'Equidistant units (click for independent x/y scaling)'
       : 'Independent x/y scaling (click for equidistant units)';
+  }
+  aspectBtn.addEventListener('click', () => {
+    setAspectLocked(!aspectLocked);
     scheduleResample();
     redraw();
   });
@@ -601,6 +771,54 @@ export function PlotPanel({
     scheduleResample();
   }
 
+  // Switching a distribution row's family resets its params to that family's own defaults
+  // (the old family's param keys wouldn't mean anything to the new one, e.g. "n"/"p" for
+  // Binomial vs "mu"/"sigma" for Normal) and its shaded region back to the whole curve, same
+  // as a freshly added row (see lib/plotRows.js's makeRow).
+  function setDistFamily(id, family) {
+    updateRow(id, { family, params: defaultDistributionParams(family), lower: '-infinity', upper: 'infinity' });
+  }
+  function setDistParam(id, key, value) {
+    const row = rows.find((r) => r.id === id);
+    if (!row) return;
+    updateRow(id, { params: { ...row.params, [key]: value } });
+  }
+  function setDistBound(id, which, value) {
+    updateRow(id, { [which]: value });
+  }
+
+  // Debounced the same way typing into any other field is (see SAMPLE_DEBOUNCE_MS) - a
+  // family/param edit fires this on every keystroke (see renderRows()'s signature check
+  // above), and re-fitting on every one of those would mean an extra couple of engine round
+  // trips per keystroke on top of the ordinary resample. Only the most recently touched row
+  // actually drives the shared view when several would otherwise want to fit at once.
+  function scheduleDistFit(rowId) {
+    clearTimeout(distFitTimer);
+    distFitTimer = setTimeout(() => fitDistributionView(rowId), SAMPLE_DEBOUNCE_MS);
+  }
+
+  // Auto-fits the shared view to a distribution row's own shape - its 90% mass on the x-axis
+  // (see computeDistributionFitView), its actual peak height on the y-axis - since the panel's
+  // ordinary default view (same [-10,10]x[-6,6], 1:1 aspect as every other plot mode) routinely
+  // makes a distribution unreadable (a Normal's density maxes out around 0.4; a Binomial's bars
+  // sit invisibly close to the x-axis). 1:1 is turned off at the same time - locking the two
+  // axes to the same scale would undo the y-axis half of this fit.
+  async function fitDistributionView(rowId) {
+    const row = rows.find((r) => r.id === rowId);
+    if (!row || row.mode !== 'distribution') return;
+    const cfg = DISTRIBUTION_FAMILIES[row.family];
+    if (!cfg) return;
+    const fit = await computeDistributionFitView(evaluateRaw, row.family, row.params, cfg.discrete);
+    if (!fit) return;
+    // The row may have moved on to a different family/params (or been removed) while the fit
+    // was in flight - stale results are dropped rather than yanking the view out from under
+    // whatever the user's doing now.
+    const current = rows.find((r) => r.id === rowId);
+    if (!current || current.family !== row.family || JSON.stringify(current.params) !== JSON.stringify(row.params)) return;
+    setAspectLocked(false);
+    onViewChange(fit);
+  }
+
   // Adds/drops sliders to match each row's currently-detected plot parameters (see
   // lib/plotParams.js) - run at the top of every renderRows() so it stays in sync whether
   // rows changed (a param typed in or out) or `definitions` did (a param just got assigned in
@@ -638,6 +856,7 @@ export function PlotPanel({
   function removeRow(id) {
     if (rows.length > 1) emitRows(rows.filter((r) => r.id !== id));
     delete curves[id];
+    distFitSignatures.delete(id);
   }
 
   function focusField(rowId, field) {
@@ -671,6 +890,15 @@ export function PlotPanel({
     const desired = [];
     rows.forEach((row, i) => {
       seen.add(row.id);
+      if (row.mode === 'distribution') {
+        const sig = `${row.family}|${JSON.stringify(row.params)}`;
+        if (distFitSignatures.get(row.id) !== sig) {
+          distFitSignatures.set(row.id, sig);
+          scheduleDistFit(row.id);
+        }
+      } else {
+        distFitSignatures.delete(row.id);
+      }
       let view = rowViews.get(row.id);
       if (!view) {
         view = createRowView({
@@ -686,6 +914,9 @@ export function PlotPanel({
           onRemove: () => removeRow(row.id),
           onSliderChange: (name, value) => setSliderValue(row.id, name, value),
           onSliderRangeChange: (name, field, value) => setSliderRange(row.id, name, field, value),
+          onFamilyChange: (family) => setDistFamily(row.id, family),
+          onParamInput: (key, value) => setDistParam(row.id, key, value),
+          onBoundChange: (which, value) => setDistBound(row.id, which, value),
         });
         rowViews.set(row.id, view);
       }
@@ -726,13 +957,22 @@ export function PlotPanel({
   }
 
   function curveList() {
-    return rows.map((row, i) => ({
-      id: row.id,
-      color: rowColor(row, i),
-      visible: row.visible,
-      points: curves[row.id]?.points,
-      style: row.mode === 'scatter' ? 'points' : row.mode === 'diffeq' ? 'field' : 'line',
-    }));
+    return rows.map((row, i) => {
+      const isDistribution = row.mode === 'distribution';
+      const discrete = isDistribution && DISTRIBUTION_FAMILIES[row.family]?.discrete;
+      const stored = curves[row.id];
+      return {
+        id: row.id,
+        color: rowColor(row, i),
+        visible: row.visible,
+        points: discrete
+          ? stored?.points?.map((p) => ({ ...p, filled: p.x >= stored.lower && p.x <= stored.upper }))
+          : stored?.points,
+        style: row.mode === 'scatter' ? 'points' : row.mode === 'diffeq' ? 'field' : discrete ? 'bars' : isDistribution ? 'area' : 'line',
+        fillFrom: isDistribution && !discrete ? stored?.lower : undefined,
+        fillTo: isDistribution && !discrete ? stored?.upper : undefined,
+      };
+    });
   }
 
   function redraw() {
@@ -811,6 +1051,26 @@ export function PlotPanel({
           continue;
         }
         sampleDiffEqField(evaluateRaw, row.exprDE, effView, fieldNx, fieldNy).then(applyResult, applyError);
+      } else if (row.mode === 'distribution') {
+        const cfg = DISTRIBUTION_FAMILIES[row.family];
+        if (!cfg) {
+          delete curves[row.id];
+          continue;
+        }
+        const sample = cfg.discrete
+          ? sampleDiscreteDistribution(evaluateRaw, row.family, row.params, xmin, xmax)
+          : sampleContinuousDistribution(evaluateRaw, row.family, row.params, xmin, xmax, points);
+        // Sequential, not Promise.all - same reason sampleScatter's two evaluateRaw calls are
+        // (see its own comment in plotSample.js): the shared bridge is only ever asked to
+        // resolve one dependent step at a time here.
+        sample
+          .then((pts) => resolveDistributionBounds(evaluateRaw, row.lower, row.upper).then((bounds) => ({ pts, bounds })))
+          .then(({ pts, bounds }) => {
+            if (requestId !== myRequest) return;
+            curves = { ...curves, [row.id]: { points: pts, error: null, lower: bounds.lower, upper: bounds.upper } };
+            renderRows();
+            redraw();
+          }, applyError);
       } else {
         if (!row.expr.trim()) {
           delete curves[row.id];
@@ -847,6 +1107,7 @@ export function PlotPanel({
   function destroy() {
     resizeObserver?.disconnect();
     clearTimeout(debounceTimer);
+    clearTimeout(distFitTimer);
     if (immediateResampleHandle != null) cancelAnimationFrame(immediateResampleHandle);
   }
 

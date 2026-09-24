@@ -7,6 +7,7 @@ import { normalizePowerCalls } from './giac.js';
 import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js';
 import { substitutePlotParams } from './plotParams.js';
 import { parseDiffEq, buildFieldComponents } from './plotDiffEq.js';
+import { distributionDomainExpr, DISTRIBUTION_FAMILIES } from './distributionParams.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -285,4 +286,152 @@ export async function sampleDiffEqField(evaluateRaw, rawExpr, view, nx, ny) {
   }
 
   return pts;
+}
+
+// A distribution row's density (continuous family) sampled the same way an ordinary function
+// row is (see sampleFunction) - `distributionDomainExpr` (distributionParams.js) already wraps
+// the family's own density call in a when(...) that masks it to NaN outside its support, so
+// the existing NaN-as-gap rendering just does the right thing without this needing its own
+// domain logic.
+export async function sampleContinuousDistribution(evaluateRaw, family, params, xmin, xmax, points) {
+  const expr = distributionDomainExpr(family, params);
+  if (!expr) return [];
+
+  const out = await evaluateRaw(buildSampleExpr(expr, xmin, xmax, points));
+  if (out.startsWith('GIAC_ERROR')) {
+    throw new Error(out.slice(11).trim() || 'Could not evaluate this distribution.');
+  }
+
+  const ys = parseSampleList(out);
+  if (!ys) throw new Error('Unexpected response from the CAS engine.');
+
+  const n = ys.length;
+  const step = n > 1 ? (xmax - xmin) / (n - 1) : 0;
+  return ys.map((y, i) => ({ x: xmin + i * step, y }));
+}
+
+// Same batching idea as buildSampleExpr, but at a fixed step of 1 starting from the first
+// integer >= kmin, up to the last integer <= kmax - used for a discrete distribution's bar
+// chart (see sampleDiscreteDistribution), where only integer k has a meaningful probability at
+// all. Returns null when the view doesn't contain any integer (kmax < kmin after rounding).
+export function buildIntegerSampleExpr(expr, kmin, kmax) {
+  const lo = Math.ceil(kmin);
+  const hi = Math.floor(kmax);
+  if (hi < lo) return null;
+  const n = hi - lo + 1;
+  return { expr: `evalf(seq(subst((${expr}),x=(${lo})+(k)),k,0,${n - 1}))`, lo };
+}
+
+// A discrete distribution row's probability function, sampled at every integer k currently in
+// view - one bar per k (see plotPanel.js's 'bars' curve style). Points whose pmf came back
+// non-finite (masked out by distributionDomainExpr's domain condition, e.g. k outside
+// [0,n] for binomial) are dropped rather than kept as gaps - there's no bar to draw there at
+// all, unlike a continuous curve's gap.
+export async function sampleDiscreteDistribution(evaluateRaw, family, params, xmin, xmax) {
+  const expr = distributionDomainExpr(family, params);
+  if (!expr) return [];
+  const built = buildIntegerSampleExpr(expr, xmin, xmax);
+  if (!built) return [];
+
+  const out = await evaluateRaw(built.expr);
+  if (out.startsWith('GIAC_ERROR')) {
+    throw new Error(out.slice(11).trim() || 'Could not evaluate this distribution.');
+  }
+
+  const ys = parseSampleList(out);
+  if (!ys) throw new Error('Unexpected response from the CAS engine.');
+
+  const pts = [];
+  ys.forEach((y, i) => {
+    if (Number.isFinite(y)) pts.push({ x: built.lo + i, y });
+  });
+  return pts;
+}
+
+const POS_INFINITY_RE = /^\+?(infinity|inf)$/i;
+const NEG_INFINITY_RE = /^-(infinity|inf)$/i;
+
+// Resolves a distribution row's lower/upper bound text (Giac expressions - "-infinity"/
+// "infinity" included, same tokens giac.js's own normald_cdf handling recognizes) to plain JS
+// numbers (+-Infinity allowed) - used by plotPanel.js to decide which part of the sampled
+// curve/bars falls inside the shaded region. Sequential, not Promise.all - same reason
+// sampleScatter's two evaluateRaw calls are sequential: the engine bridge only tracks one
+// in-flight evaluation at a time.
+async function resolveDistributionBound(evaluateRaw, text, fallback) {
+  const t = (text ?? '').trim();
+  if (!t) return fallback;
+  if (POS_INFINITY_RE.test(t)) return Infinity;
+  if (NEG_INFINITY_RE.test(t)) return -Infinity;
+  const out = await evaluateRaw(`evalf(${t})`);
+  const trimmed = out.trim();
+  if (out.startsWith('GIAC_ERROR')) return fallback;
+  if (NUMBER_RE.test(trimmed)) return parseFloat(trimmed);
+  if (POS_INFINITY_RE.test(trimmed)) return Infinity;
+  if (NEG_INFINITY_RE.test(trimmed)) return -Infinity;
+  return fallback;
+}
+
+export async function resolveDistributionBounds(evaluateRaw, lower, upper) {
+  const lo = await resolveDistributionBound(evaluateRaw, lower, -Infinity);
+  const hi = await resolveDistributionBound(evaluateRaw, upper, Infinity);
+  return { lower: lo, upper: hi };
+}
+
+// The middle 90% of a family's own mass (5th/95th percentile, via its _icdf command - the
+// same command distributionMenu.js's "Probability (p)" field already builds on) - a
+// distribution's default [-10,10]/1:1 view (same as every other plot row) routinely makes it
+// unreadable: a Normal's density maxes out around 0.4 against a 12-unit-tall axis, a Poisson's
+// bars sit invisibly close to the x-axis, and a Cauchy/Student(1)'s heavy tails would demand an
+// enormous range at a stricter percentile (its own 99.8% range is +-318 units - confirmed
+// against the engine - which would flatten the interesting part back into invisibility, the
+// same problem this is solving). 90% is a deliberately loose target: readable for heavy-tailed
+// families without meaningfully cropping the well-behaved ones (Normal's own 90% range is
+// already +-2.33 sigma).
+const FIT_LOWER_P = 0.05;
+const FIT_UPPER_P = 0.95;
+
+// Computes a "this distribution, clearly visible" view for lib/plotPanel.js's auto-fit (see
+// its fitDistributionView) - an x-range from this family's own 5th/95th percentile (padded a
+// little further for a continuous curve; rounded out to whole bars for a discrete one), and a
+// y-range sized to the actual peak density/pmf sampled over that x-range (rather than a
+// guessed constant), so every family gets a sensibly-scaled view regardless of its own natural
+// magnitude. Returns null if the family's own _icdf/density calls error out (an invalid
+// parameter mid-edit, e.g. a blank field) - the caller just leaves the view alone then.
+export async function computeDistributionFitView(evaluateRaw, family, params, discrete) {
+  const cfg = DISTRIBUTION_FAMILIES[family];
+  if (!cfg) return null;
+  const args = cfg.params.map((p) => `(${params[p.key] ?? p.default})`).join(',');
+
+  // Sequential, not Promise.all - see resolveDistributionBound's own comment above for why.
+  const loOut = await evaluateRaw(`evalf(${family}_icdf(${args},${FIT_LOWER_P}))`);
+  if (loOut.startsWith('GIAC_ERROR')) return null;
+  const hiOut = await evaluateRaw(`evalf(${family}_icdf(${args},${FIT_UPPER_P}))`);
+  if (hiOut.startsWith('GIAC_ERROR')) return null;
+  const lo = parseFloat(loOut.trim());
+  const hi = parseFloat(hiOut.trim());
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+
+  let xmin, xmax;
+  if (discrete) {
+    // A couple of bars' worth of padding on each side so the outermost bars aren't flush
+    // against the plot's edge.
+    xmin = Math.floor(lo) - 2;
+    xmax = Math.ceil(hi) + 2;
+  } else {
+    const pad = (hi - lo) * 0.25 || 1;
+    xmin = lo - pad;
+    xmax = hi + pad;
+  }
+
+  const pts = discrete
+    ? await sampleDiscreteDistribution(evaluateRaw, family, params, xmin, xmax)
+    : await sampleContinuousDistribution(evaluateRaw, family, params, xmin, xmax, 200);
+  const peak = pts.reduce((m, p) => (Number.isFinite(p.y) && p.y > m ? p.y : m), 0);
+  const ymax = peak > 0 ? peak * 1.2 : 1;
+  // A little headroom below zero too, so a bar/curve sitting right on the x-axis doesn't
+  // touch the very edge of the canvas, and the x-axis's own tick labels (drawn just above it)
+  // have room to sit without overlapping the curve.
+  const ymin = -ymax * 0.08;
+
+  return { xmin, xmax, ymin, ymax };
 }

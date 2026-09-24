@@ -17,8 +17,12 @@ import { collectFreeVariables, expandKnownFunctionCalls } from './giac.js';
 // plane y/y' for a 2nd-order equation - see plotDiffEq.js), and any other name it mentions
 // resolves the same way any bare CAS expression's would - through a value the user has
 // already assigned this session (e.g. "a:=2"), same as typing it at the prompt.
-const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [], diffeq: [] };
-const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [], diffeq: [] };
+//
+// distribution gets no sliders either - its parameters (mu/sigma, n/p, ...) are already their
+// own dedicated fields (see lib/plotRows.js's `params`/lib/distributionParams.js), not free
+// variables detected from expression text.
+const BOUND_VARS = { function: ['x'], parametric: ['t'], complex: ['t'], scatter: [], diffeq: [], distribution: [] };
+const PARAM_FIELDS = { function: ['expr'], parametric: ['exprX', 'exprY'], complex: ['exprZ'], scatter: [], diffeq: [], distribution: [] };
 
 const DEFAULT_SLIDER = { value: 1, min: -10, max: 10, step: 0.1 };
 

@@ -1495,22 +1495,25 @@ export function mountApp(root) {
   // Sends a history entry's plottable input or output (see lib/plottable.js) to the plot
   // panel - wired to both the entry's own two "plot" buttons (historyEntry.js) and the "p"
   // keyboard shortcut on whichever half is currently selected (handleKeyDown above). `spec` is
-  // `{mode, expr}` - 'function' for an ordinary y=f(x) curve (from either a function-defining
+  // `{mode, patch}` - 'function' for an ordinary y=f(x) curve (from either a function-defining
   // input or a plain output, see plottableInputForEntry/plottableOutputForEntry), 'diffeq' for
-  // a differential equation's vector field. Reuses the first still-blank row of that *same*
-  // mode if there is one (the spare row a freshly opened/emptied panel always keeps ready to
-  // type into - see focusOnMount in plotPanel.js) rather than always adding a new one, so
-  // plotting right after opening the panel for the first time doesn't leave two rows where one
-  // would do; a blank row of a *different* mode is left alone, since e.g. a blank function row
-  // isn't a valid place to drop a differential equation's text.
-  const PLOT_SPEC_FIELD = { function: 'expr', diffeq: 'exprDE' };
-  function addExpressionToPlot({ mode, expr }) {
-    const field = PLOT_SPEC_FIELD[mode];
-    const blankIdx = state.plotRows.findIndex((r) => r.mode === mode && !r[field].trim());
+  // a differential equation's vector field, 'distribution' for a `_cdf` command's own
+  // distribution with its queried region shaded (see parseDistributionCdfCall). Reuses the
+  // first still-blank row of that *same* mode if there is one (the spare row a freshly
+  // opened/emptied panel always keeps ready to type into - see focusOnMount in plotPanel.js)
+  // rather than always adding a new one, so plotting right after opening the panel for the
+  // first time doesn't leave two rows where one would do; a blank row of a *different* mode is
+  // left alone, since e.g. a blank function row isn't a valid place to drop a differential
+  // equation's text. 'distribution' never reuses a blank row - unlike a single text field,
+  // "blank" isn't well-defined for a family+params row, so a fresh one is always appended.
+  const PLOT_SPEC_BLANK = { function: (r) => !r.expr.trim(), diffeq: (r) => !r.exprDE.trim(), distribution: () => false };
+  function addExpressionToPlot({ mode, patch }) {
+    const isBlank = PLOT_SPEC_BLANK[mode];
+    const blankIdx = state.plotRows.findIndex((r) => r.mode === mode && isBlank(r));
     const nextRows =
       blankIdx !== -1
-        ? state.plotRows.map((r, i) => (i === blankIdx ? { ...r, [field]: expr } : r))
-        : [...state.plotRows, { ...makeRow(), mode, [field]: expr }];
+        ? state.plotRows.map((r, i) => (i === blankIdx ? { ...r, ...patch } : r))
+        : [...state.plotRows, { ...makeRow(), mode, ...patch }];
     state.plotRows = nextRows;
 
     if (state.plotOpen) {
