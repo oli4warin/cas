@@ -2093,6 +2093,43 @@ export function sameNumericValue(a, b) {
   return !!pa && !!pb && pa.sign === pb.sign && pa.sig === pb.sig && pa.exponent === pb.exponent;
 }
 
+const EMBEDDED_FRACTION_RE = /-?\d+\/\d+/g;
+
+// evaluate()'s generic fallback (below) treats any decimal-point literal surviving into its
+// result as proof Giac had to fall back to floating point somewhere (see
+// EMBEDDED_DECIMAL_TEST_RE's own comment: exact() never introduces a decimal into a
+// genuinely symbolic result). That reasoning breaks down whenever the *input* itself already
+// carried a decimal literal - e.g. "(x,f(x))|x=-0.3808", substituting a typed decimal point
+// into an otherwise ordinary expression - since Giac's ambient (non-exact) mode then computes
+// everything in floating point from the start, even though nothing about the arithmetic
+// itself (+, -, *, /, substitution) is actually lossy there. This re-runs `sentExpr` through
+// exact() (forcing genuine rational arithmetic - the same trick evaluateApprox uses in
+// reverse) and checks, position for position, whether every decimal in the float result is
+// exactly the terminating decimal expansion of the correspondingly-placed fraction exact()
+// came back with (see terminatingDecimalString/sameNumericValue) - if every one of them is,
+// nothing was actually lost, so the result should read as exact after all. Any structural
+// mismatch (a different fraction/decimal count than `floatOut` - term order can shift once
+// autosimplify/reorderConstantRadicalSum are re-applied to exact()'s own output, so both
+// sides are run through the same pipeline first to keep them aligned - a fraction that
+// doesn't terminate, or exact() itself erroring, e.g. on a plot/graphics command) falls back
+// to `false`, the original, safe "≈" labeling - a genuinely irrational value like sqrt(2)
+// lands here too, since its reconstructed "exact" fraction never terminates.
+async function isExactDespiteDecimals(sentExpr, floatOut) {
+  const decimals = floatOut.match(EMBEDDED_DECIMAL_RE) || [];
+  if (decimals.length === 0) return true;
+  let exactOut = stripTrailingSemicolon(await rawEvalAsync(`exact(${sentExpr})`));
+  if (exactOut.startsWith('GIAC_ERROR')) return false;
+  exactOut = reorderConstantRadicalSum(await applyAutosimplify(exactOut));
+  const fractions = exactOut.match(EMBEDDED_FRACTION_RE) || [];
+  if (fractions.length !== decimals.length) return false;
+  for (let i = 0; i < decimals.length; i++) {
+    const m = fractions[i].match(/^(-?\d+)\/(\d+)$/);
+    const exactDecimal = terminatingDecimalString(BigInt(m[1]), BigInt(m[2]));
+    if (!exactDecimal || !sameNumericValue(exactDecimal, decimals[i])) return false;
+  }
+  return true;
+}
+
 // Builds an evaluateApprox() result for a value that's known exact (a plain integer, or a
 // fraction whose decimal expansion terminates) - "≈" only appears when roundForDisplay had to
 // round it down to the Digits setting's significant digits to show it (e.g. a huge power or
@@ -2567,12 +2604,12 @@ export async function evaluate(expr, definitions) {
   // caseval() never brackets one itself. "≈" only appears when `taued` already has a
   // decimal-point literal in it somewhere - exactly labelSolveTuples's own EMBEDDED_DECIMAL_
   // TEST_RE reasoning (Giac's exact() never introduces one into a genuinely symbolic result,
-  // so any that's there already means this is one of Giac's own numeric fallbacks) - rather
-  // than comparing the rounded text against the original, which would also flag a merely
-  // *reformatted* exact value (e.g. Giac's own "1.5e3" restated as the equivalent "1500") as
-  // if it had lost precision when it hasn't.
+  // so any that's there already means this is one of Giac's own numeric fallbacks) - AND
+  // isExactDespiteDecimals can't instead show every one of those decimals is exactly right
+  // (e.g. `sentExpr` substituted a typed decimal literal straight through, like
+  // "(x,f(x))|x=-0.3808", rather than Giac ever actually approximating anything).
   const taued = piToTau(simplifiedOut);
-  const isApprox = EMBEDDED_DECIMAL_TEST_RE.test(taued);
+  const isApprox = EMBEDDED_DECIMAL_TEST_RE.test(taued) && !(await isExactDespiteDecimals(sentExpr, taued));
   const rounded = roundEmbeddedDecimals(taued);
   const wrapped = wrapBareSequence(rounded);
   const simplifiedOutDisplay = wrapped ?? rounded;
