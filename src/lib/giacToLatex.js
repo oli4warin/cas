@@ -9,6 +9,7 @@
 // per-keystroke preview.
 
 import { XCAS_COMMANDS, XCAS_COMMAND_ALIASES, expandInverseTrigAliases } from './xcasCommands.js';
+import { roundForDisplay } from './numberDisplay.js';
 
 const UNARY_PREC = 7; // same as '^', so "-x^2" parses as -(x^2), matching math convention.
 
@@ -76,7 +77,11 @@ function tokenize(s) {
       continue;
     }
     if (/[0-9.]/.test(c)) {
-      const m = /^(\d+\.\d*|\.\d+|\d+)/.exec(s.slice(i));
+      // The optional "e[+-]?digits" suffix is Giac's own scientific-notation spelling (e.g.
+      // "1.23e+15") - it only matches with at least one exponent digit present, so a bare
+      // trailing "e" (still-typing "2e", or "2ex" meaning "2*ex") is left as its own identifier
+      // token exactly as before (see the 'e'-as-Euler's-constant case in render below).
+      const m = /^(\d+\.\d*|\.\d+|\d+)(?:e[+-]?\d+)?/i.exec(s.slice(i));
       if (m) {
         tokens.push({ type: 'num', value: m[0] });
         i += m[0].length;
@@ -237,13 +242,13 @@ function makeParser(tokens) {
 
     if (tok.type === 'op' && tok.value === '(') {
       next();
-      const inner = parseExpression(0);
-      let closed = false;
-      if (peek() && peek().type === 'op' && peek().value === ')') {
-        next();
-        closed = true;
-      }
-      return { type: 'paren', inner, closed };
+      // A single expression is plain grouping ("paren" - stripRedundantParen below only
+      // unwraps this shape), but Giac also uses "(...)" for a literal comma-separated tuple/
+      // sequence (e.g. "(x,f(x))|x=..." - a point paired with its substituted value), which
+      // needs the same comma-list handling parseArgList already gives "[...]"/"{...}".
+      const { items, closed } = parseArgList(')');
+      if (items.length !== 1) return { type: 'tuple', items, closed };
+      return { type: 'paren', inner: items[0], closed };
     }
 
     if (tok.type === 'op' && tok.value === '[') {
@@ -322,8 +327,20 @@ function operatorLabel(name) {
 function render(node) {
   if (node == null) return '';
   switch (node.type) {
-    case 'num':
-      return node.value;
+    case 'num': {
+      // Rendered verbatim as typed (preserving e.g. a trailing "1.50"'s zero, still being
+      // typed towards something longer) unless it already has more significant digits than
+      // the Digits setting shows for a computed result (see roundForDisplay in
+      // numberDisplay.js) - a pasted or substituted value (e.g. "(x,f(x))|x=<75-digit root>")
+      // shouldn't dump every digit into the preview when the actual result wouldn't either.
+      // A literal already in Giac's own scientific notation (e.g. "1.23e+15") always goes
+      // through roundForDisplay regardless, since a bare "e" in raw LaTeX would otherwise be
+      // read as Euler's constant rather than an exponent (same reason giac.js's own
+      // fixScientificNotation exists for computed results) - roundForDisplay's own latex
+      // always renders it correctly via "\cdot 10^{}", rounded or not.
+      const disp = roundForDisplay(node.value);
+      return disp && (disp.rounded || /e/i.test(node.value)) ? disp.latex : node.value;
+    }
     case 'var': {
       const lname = node.name.toLowerCase();
       const primes = node.primes || '';
@@ -367,6 +384,8 @@ function render(node) {
       return `${render(node.arg)}!`;
     case 'paren':
       return `\\left(${render(node.inner)}\\right)`;
+    case 'tuple':
+      return `\\left(${node.items.map(render).join(',\\ ')}\\right)`;
     case 'bracket':
       return isMatrixNode(node) ? renderMatrix(node) : `\\left[${node.items.map(render).join(',\\ ')}\\right]`;
     case 'brace':

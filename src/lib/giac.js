@@ -4,6 +4,7 @@
 // timeout here just terminates and respawns the worker to recover).
 
 import { giacToLatex } from './giacToLatex.js';
+import { getDisplayDigits, setDisplayDigits, parseDecimal, sciLatex, roundForDisplay } from './numberDisplay.js';
 import { XCAS_COMMAND_ALIASES, expandInverseTrigAliases } from './xcasCommands.js';
 import { fitSinusoid } from './sinRegression.js';
 import { fitPolynomial, fitPower, fitExponential, fitLogarithmic, fitLogistic } from './regression.js';
@@ -355,6 +356,19 @@ function splitTopLevel(s, sep) {
   }
   parts.push(s.slice(start));
   return parts;
+}
+
+// Wraps `s` in "(...)" if - and only if - it's a bare, top-level comma sequence (Giac's own
+// "seq" type never comes back bracketed from caseval(), regardless of how it was typed:
+// "(1,2,3)" submitted evaluates right back to the bare "1,2,3", confirmed against the actual
+// engine, same as typing "1,2,3" without parens at all). Used by evaluate()/evaluateApprox()'s
+// generic fallback so e.g. "(x,f(x))|x=..." - a point paired with a substituted value - reads
+// as the tuple it is rather than a bare, unbracketed pair of numbers. Returns null for anything
+// that isn't shaped like one (no top-level comma at all), so callers keep their own
+// single-value rendering untouched.
+function wrapBareSequence(s) {
+  const parts = splitTopLevel(s, ',');
+  return parts.length > 1 ? `(${parts.join(',')})` : null;
 }
 
 // Splits `s` on its own top-level '+'/'-' operators, keeping each term's own leading sign
@@ -1276,22 +1290,52 @@ function parseSolveTuples(raw, varNames) {
 // touches this *display* copy of each value, never the plain `values` themselves -
 // reinsertRaw/tuples (raw/saveExpr's source, see formatSolveResult/buildSaveAssignment) stay
 // in terms of pi, which is always valid Giac syntax; "tau" isn't bound to anything in the
-// engine, so it'd be a broken reference if reinserted or saved. Shared by parseSolveSolutions
-// below and parseCertificateOfExistence's single-witness-point case.
+// engine, so it'd be a broken reference if reinserted or saved.
+//
+// True when `value` (one solve()-style exact-mode value, before piToTau/roundEmbeddedDecimals)
+// contains a raw decimal-point literal anywhere in it - see roundEmbeddedDecimals above for why
+// that's always a sign it's really one of Giac's own numeric fallbacks (exact() never
+// introduces a decimal into a genuinely symbolic result, e.g. exact(0.5) is 1/2, not 0.5),
+// however this string ends up labeled - used by labelSolveTuples below to show such a value
+// with "≈" rather than "=", even though it came from the sheet's own "exact" evaluation path.
+const EMBEDDED_DECIMAL_TEST_RE = /\d+\.\d+/;
+
+// Builds one {text, latex} fragment per solution - each entry is `tuples.length` values long
+// (one per variable in `varNames`), joined with " and "/AND_LATEX_JOINER the same way
+// formatSolveResultApprox's own formatSolveValueFragment-based fragments are. `values`
+// (untouched, unrounded) is what reinsertRaw/saveExpr are built from elsewhere (see
+// parseSolveSolutions/buildSaveAssignment) - roundEmbeddedDecimals/the "≈" labeling here only
+// ever reshape the *displayed* text/latex, so copying/saving a solution still gets Giac's full,
+// unrounded numeric fallback value. Shared by parseSolveSolutions below and
+// parseCertificateOfExistence's single-witness-point case.
 function labelSolveTuples(tuples, varNames) {
   return tuples.map((values, idx) => {
     const suffix = tuples.length > 1 ? `_${idx + 1}` : '';
-    return varNames
-      .map((name, i) => {
-        const value = values[i];
-        // roundEmbeddedDecimals here only reshapes the *displayed* clause text - `values`
-        // itself (what reinsertRaw/saveExpr are built from, see parseSolveSolutions/
-        // buildSaveAssignment) is never touched, so copying/saving a solution still gets
-        // Giac's full, unrounded numeric fallback value.
-        const display = roundEmbeddedDecimals(piToTau(value));
-        return hasTopLevelRelation(value) ? display : `${name}${suffix}=${display}`;
-      })
-      .join(' and ');
+    const fragments = varNames.map((name, i) => {
+      const value = values[i];
+      const display = roundEmbeddedDecimals(piToTau(value));
+      // A relation (e.g. "x>6") is shown using its own value as-is, no "name=" label at all -
+      // the value already says which variable it constrains (see formatSolveResult's own
+      // comment on this same shape for formatSolveValueFragment's approx counterpart).
+      if (hasTopLevelRelation(value)) return { text: display, latex: giacToLatex(display) };
+      const label = `${name}${suffix}`;
+      if (!EMBEDDED_DECIMAL_TEST_RE.test(value)) {
+        return { text: `${label}=${display}`, latex: giacToLatex(`${label}=${display}`) };
+      }
+      // Built from separately-latexed pieces (rather than latexing a single "label ≈ display"
+      // string whole) since "≈" isn't valid Giac syntax for giacToLatex to parse - mirrors
+      // formatSolveValueFragment's own approx branch.
+      const labelLatex = giacToLatex(label);
+      const valueLatex = giacToLatex(display);
+      return {
+        text: `${label} ≈ ${display}`,
+        latex: labelLatex != null && valueLatex != null ? `${labelLatex} \\approx ${valueLatex}` : null,
+      };
+    });
+    return {
+      text: fragments.map((f) => f.text).join(' and '),
+      latex: fragments.every((f) => f.latex != null) ? fragments.map((f) => f.latex).join(AND_LATEX_JOINER) : null,
+    };
   });
 }
 
@@ -1332,14 +1376,11 @@ function buildSaveAssignment(tuples, varNames) {
   return varNames.length > 1 ? `${varNames.join(',')}:=${rhs.join(',')}` : `${varNames[0]}:=${rhs[0]}`;
 }
 
-// Stacks each already-labeled solution clause (see parseSolveSolutions) on its own row via
-// MathJax's `gathered` environment - the same technique historyEntry.js uses for a
-// multi-line input. Renders each clause separately (rather than the whole block as one
-// string) since giacToLatex only understands one Giac expression at a time. Returns null,
-// same as giacToLatex itself, if any clause fails to convert.
+// Stacks each already-labeled solution clause's own latex (see labelSolveTuples) on its own row
+// via MathJax's `gathered` environment - the same technique historyEntry.js uses for a
+// multi-line input. Returns null, same as giacToLatex itself, if any clause's latex is missing.
 function renderGatheredLatex(clauses) {
-  const rendered = clauses.map((clause) => giacToLatex(clause));
-  return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : null;
+  return clauses.every((c) => c.latex != null) ? `\\begin{gathered}${clauses.map((c) => c.latex).join('\\\\')}\\end{gathered}` : null;
 }
 
 // Builds the {text, latex} pair for a solve() result once it's known which variables solve()
@@ -1378,8 +1419,8 @@ function formatSolveResult(raw, varNames) {
   if (parsed) {
     const { clauses, reinsertRaw, tuples } = parsed;
     return {
-      text: clauses.join('\n'),
-      latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
+      text: clauses.map((c) => c.text).join('\n'),
+      latex: clauses.length === 1 ? clauses[0].latex : renderGatheredLatex(clauses),
       raw: reinsertRaw !== undefined ? reinsertRaw : raw,
       saveExpr: buildSaveAssignment(tuples, varNames),
     };
@@ -1389,10 +1430,9 @@ function formatSolveResult(raw, varNames) {
   if (certificateTuples) {
     const clause = labelSolveTuples(certificateTuples, varNames)[0];
     const note = 'found numerically — more solutions may exist';
-    const clauseLatex = giacToLatex(clause);
     return {
-      text: `${clause} (${note})`,
-      latex: clauseLatex != null ? `${clauseLatex}\\quad(\\text{${note}})` : null,
+      text: `${clause.text} (${note})`,
+      latex: clause.latex != null ? `${clause.latex}\\quad(\\text{${note}})` : null,
       raw,
       saveExpr: null,
     };
@@ -1459,8 +1499,8 @@ function formatFMaxFMinResult(raw, varName) {
   const clauses = labelSolveTuples(tuples, varNames);
   const reinsertRaw = tuples.length === 1 ? tuples[0][0] : `list[${tuples.map((t) => t[0]).join(',')}]`;
   return {
-    text: clauses.join('\n'),
-    latex: clauses.length === 1 ? giacToLatex(clauses[0]) || null : renderGatheredLatex(clauses),
+    text: clauses.map((c) => c.text).join('\n'),
+    latex: clauses.length === 1 ? clauses[0].latex : renderGatheredLatex(clauses),
     raw: reinsertRaw,
     saveExpr: buildSaveAssignment(tuples, varNames),
   };
@@ -1750,14 +1790,14 @@ export function setPauMode(on) {
 }
 
 // How many significant digits an approximate numeric result is ever *displayed* with (see the
-// "Digits" setting in app.js's settings menu). Purely a display-time rounding, same as tauMode
-// above - it never touches `raw` (what a result's own copy/reinsertion/save uses, see
-// reinsertableValue/saveable.js), only the text/latex shown for it, so copying a result always
-// gets Giac's full, unrounded computation regardless of this setting.
-let displayDigits = 6;
-
+// "Digits" setting in app.js's settings menu) - the actual setting lives in numberDisplay.js
+// (shared with giacToLatex.js's own live input-preview renderer, which can't import this module
+// itself - see there for why). Purely a display-time rounding, same as tauMode above - it never
+// touches `raw` (what a result's own copy/reinsertion/save uses, see reinsertableValue/
+// saveable.js), only the text/latex shown for it, so copying a result always gets Giac's full,
+// unrounded computation regardless of this setting.
 export function setDigits(n) {
-  displayDigits = Math.max(1, Math.min(15, Math.trunc(n) || 6));
+  setDisplayDigits(n);
 }
 
 // Rewrites every "coefficient*pi" term in `s` (a piece of Giac syntax, e.g. a solve()
@@ -1912,15 +1952,6 @@ function stripTrailingSemicolon(s) {
   return s.length > 1 && s[s.length - 1] === ';' ? s.slice(0, -1) : s;
 }
 
-// Renders a normalized-scientific mantissa/exponent pair as LaTeX - a mantissa of exactly
-// "1"/"-1" drops the "\cdot" (just "10^{6}", not "1 \cdot 10^{6}") since it carries no
-// information.
-function sciLatex(mantissa, exponent) {
-  if (mantissa === '1') return `10^{${exponent}}`;
-  if (mantissa === '-1') return `-10^{${exponent}}`;
-  return `${mantissa} \\cdot 10^{${exponent}}`;
-}
-
 // Giac's own latex() leaves a scientific-notation number (its display form for anything
 // past its precision threshold, e.g. "1.2e-06" or "1e+20") completely untouched instead of
 // converting it - MathJax then reads the bare "e" as Euler's constant and the sign/digits
@@ -2033,80 +2064,9 @@ function fixMathrmProseText(latex) {
   return out;
 }
 
-// Parses a plain Giac number string - "4000000", "-0.00000001", or already-scientific like
-// "1.2e-06" - into its exact (string/BigInt-only, so never lossy for arbitrarily large/small
-// numbers) normalized-scientific decomposition: the signed significant digits and the decimal
-// exponent of the leading one. Returns null for anything that isn't a single plain real
-// number (an equation, complex number, list, matrix, ...) - those are left to Giac's own
-// latex() untouched.
-function parseDecimal(str) {
-  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(str.trim());
-  if (!m) return null;
-  const [, signStr, intPart, fracPart = '', expPart] = m;
-  const digits = intPart + fracPart;
-  const firstSig = digits.search(/[1-9]/);
-  if (firstSig === -1) return { sign: '', sig: '0', exponent: 0 }; // the value is zero
-  const giacExp = expPart ? parseInt(expPart, 10) : 0;
-  const exponent = intPart.length + giacExp - firstSig - 1;
-  const sig = digits.slice(firstSig).replace(/0+$/, '') || '0';
-  return { sign: signStr, sig, exponent };
-}
-
-// Rounds a digit string to `precision` significant digits (round-half-up), returning the
-// (possibly shorter, trailing-zero-trimmed) result and the exponent adjustment a carry out of
-// the leading digit needs (e.g. rounding "999999999999" + next digit "9" up by one digit).
-function roundSignificantDigits(sig, exponent, precision) {
-  if (sig.length <= precision) return { sig, exponent };
-  let rounded = BigInt(sig.slice(0, precision)) + (sig[precision] >= '5' ? 1n : 0n);
-  let roundedStr = rounded.toString();
-  if (roundedStr.length > precision) {
-    // Carried out of the leading digit (e.g. 999...9 -> 1000...0) - that extra digit is
-    // really the start of the next power of ten, so drop it and bump the exponent instead.
-    roundedStr = roundedStr.slice(0, precision);
-    exponent += 1;
-  }
-  return { sig: roundedStr.replace(/0+$/, '') || '0', exponent };
-}
-
-// Renders a rounded (sign,sig,exponent) triple (see parseDecimal/roundSignificantDigits) back
-// into a plain decimal/integer string, e.g. ('', '333333', -1) -> "0.333333", ('-', '125', 2)
-// -> "-125", ('', '125', 4) -> "125000". Trailing zeros needed to reach the decimal point for a
-// large exponent are the only zeros ever added - `sig` itself is already trailing-zero-trimmed
-// by roundSignificantDigits, so this never fabricates trailing fractional zeros.
-function sigToPlainDecimal(sign, sig, exponent) {
-  if (exponent < 0) return `${sign}0.${'0'.repeat(-exponent - 1)}${sig}`;
-  if (exponent + 1 >= sig.length) return `${sign}${sig}${'0'.repeat(exponent + 1 - sig.length)}`;
-  return `${sign}${sig.slice(0, exponent + 1)}.${sig.slice(exponent + 1)}`;
-}
-
-// Rounds `str` (a plain decimal/integer, or Giac's own scientific form) to `displayDigits`
-// significant figures for *display only* - see displayDigits above for why this never touches
-// the value a result is copied/reinserted/saved as (that's always `raw`, computed straight from
-// Giac with no rounding). Returns null (meaning: not a single plain real number - an equation,
-// list, matrix, complex number, ... - left to Giac's own latex()/text instead) when `str` isn't
-// one, parseDecimal's own signal for that. Otherwise returns { text, latex, rounded }: `text`/
-// `latex` are the same rounded value, formatted as a plain decimal or, once the rounded
-// magnitude needs more integer digits/leading zeros than displayDigits shows, in scientific
-// notation (latex via sciLatex, text as a plain "1.23457e+19" fallback); `rounded` says whether
-// displaying it at this precision actually dropped real (nonzero) digits, so callers can show
-// "≈" instead of "=" once it did (mirrors this same distinction from formatApproxSci's original
-// scientific-only version).
-function roundForDisplay(str) {
-  const parsed = parseDecimal(str);
-  if (!parsed) return null;
-  let { sign, sig, exponent } = parsed;
-  const rounded = sig.length > displayDigits;
-  ({ sig, exponent } = roundSignificantDigits(sig, exponent, displayDigits));
-  if (exponent >= displayDigits || exponent <= -(displayDigits + 1)) {
-    const mantissa = sign + sig[0] + (sig.length > 1 ? `.${sig.slice(1)}` : '');
-    return { text: `${mantissa}e${exponent >= 0 ? '+' : ''}${exponent}`, latex: sciLatex(mantissa, exponent), rounded };
-  }
-  const text = sigToPlainDecimal(sign, sig, exponent);
-  return { text, latex: text, rounded };
-}
-
-// Rounds every embedded decimal-point number literal in a Giac-syntax string to displayDigits
-// significant digits (see roundForDisplay) - unlike roundForDisplay itself, `s` doesn't have to
+// Rounds every embedded decimal-point number literal in a Giac-syntax string to the Digits
+// setting's significant digits (see roundForDisplay in numberDisplay.js) - unlike
+// roundForDisplay itself, `s` doesn't have to
 // *be* a single bare number, just contain one or more somewhere in otherwise-arbitrary Giac
 // syntax (a solve() clause like "x=-0.380848513295377192923057620676605285938427..."). Only
 // decimal-point literals are touched - a plain integer is always exact syntax as typed/computed
@@ -2135,8 +2095,8 @@ export function sameNumericValue(a, b) {
 
 // Builds an evaluateApprox() result for a value that's known exact (a plain integer, or a
 // fraction whose decimal expansion terminates) - "≈" only appears when roundForDisplay had to
-// round it down to displayDigits significant digits to show it (e.g. a huge power or
-// factorial, or just more decimal places than displayDigits allows), same as it would for a
+// round it down to the Digits setting's significant digits to show it (e.g. a huge power or
+// factorial, or just more decimal places than that setting allows), same as it would for a
 // genuinely rounded value like 17/3; otherwise the full value is shown, with no marker, since
 // nothing was lost.
 function exactNumberResult(str) {
@@ -2533,8 +2493,8 @@ export async function evaluate(expr, definitions) {
     const leftLatex = await fetchLatex(exactPartDisplay);
     if (exactDecimal) {
       // Our own recomputed decimal is verified exact, but displaying it can still mean
-      // rounding it down to displayDigits significant digits once it has more of them than
-      // that shows (see roundForDisplay) - "=" is only honest when that didn't happen;
+      // rounding it down to the Digits setting's significant digits once it has more of them
+      // than that shows (see roundForDisplay) - "=" is only honest when that didn't happen;
       // otherwise it's "≈" the same as the non-terminating case just below.
       const disp = roundForDisplay(exactDecimal);
       const approxDisplay = disp?.rounded;
@@ -2596,15 +2556,44 @@ export async function evaluate(expr, definitions) {
   }
 
   const simplifiedOut = reorderConstantRadicalSum(await applyAutosimplify(out));
-  // `raw` stays pi-based (see the tailMatch branch above for why); only text/latex show the
-  // tau-converted form.
-  const simplifiedOutDisplay = piToTau(simplifiedOut);
-  let latexOut = await fetchLatex(simplifiedOutDisplay);
+  // `raw` stays pi-based and unrounded (see the tailMatch branch above for why) - copying the
+  // result (see historyEntry.js) always gets Giac's own full-precision syntax back, same as
+  // every other result's raw. Only text/latex show the tau-converted, digit-rounded form -
+  // this is what covers a list/matrix/tuple of decimals (a lone scalar never reaches this
+  // generic fallback, see EXACT_DECIMAL_TAIL_RE above), the same roundEmbeddedDecimals
+  // solve()'s own numeric fallback uses (see labelSolveTuples). A bare top-level comma
+  // sequence (e.g. "(x,f(x))|x=..." substituting a point's coordinates) is wrapped in "(...)"
+  // for display (see wrapBareSequence) so it reads as the tuple/point it is, since Giac's own
+  // caseval() never brackets one itself. "≈" only appears when `taued` already has a
+  // decimal-point literal in it somewhere - exactly labelSolveTuples's own EMBEDDED_DECIMAL_
+  // TEST_RE reasoning (Giac's exact() never introduces one into a genuinely symbolic result,
+  // so any that's there already means this is one of Giac's own numeric fallbacks) - rather
+  // than comparing the rounded text against the original, which would also flag a merely
+  // *reformatted* exact value (e.g. Giac's own "1.5e3" restated as the equivalent "1500") as
+  // if it had lost precision when it hasn't.
+  const taued = piToTau(simplifiedOut);
+  const isApprox = EMBEDDED_DECIMAL_TEST_RE.test(taued);
+  const rounded = roundEmbeddedDecimals(taued);
+  const wrapped = wrapBareSequence(rounded);
+  const simplifiedOutDisplay = wrapped ?? rounded;
+  // Latexes the *unwrapped* sequence - Giac's own latex() drops a bare sequence's parens too,
+  // the same as caseval() does for its own output (confirmed against the engine: even
+  // "latex(quote((1,2)))" comes back as the bare "1,2"), so passing the "(...)"-wrapped form
+  // through wouldn't get them into the result either. Added back by hand below instead, to
+  // match simplifiedOutDisplay's own text rendering above.
+  let latexOut = await fetchLatex(rounded);
+  if (wrapped != null && latexOut != null) latexOut = `\\left(${latexOut}\\right)`;
   // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
   // unevaluated (e.g. "integrate(exp(sin(x)),x)") - that's not a Stammfunktion, and the
   // integral notation itself already stands for the whole family up to a constant.
   if (isIndefiniteIntegral(sentExpr) && !isIndefiniteIntegral(simplifiedOut)) latexOut = appendArbitraryConstant(latexOut);
-  return { raw: simplifiedOut, isError: false, text: simplifiedOutDisplay, latex: latexOut, isGraphics: false };
+  return {
+    raw: simplifiedOut,
+    isError: false,
+    text: `${isApprox ? '≈ ' : ''}${simplifiedOutDisplay}`,
+    latex: latexOut != null ? `${isApprox ? '\\approx ' : ''}${latexOut}` : null,
+    isGraphics: false,
+  };
 }
 
 function bigGcd(a, b) {
@@ -2918,19 +2907,35 @@ export async function evaluateApprox(expr, definitions) {
   }
 
   // A bare number is handled without a Giac round-trip - roundForDisplay already has enough
-  // to decide and render it. Anything else (complex number, list, matrix, ...) still needs
-  // Giac's own latex() as before. approxOut came from evalf(), so it's already inherently a
-  // rounded approximation regardless of roundForDisplay's own `rounded` flag - the "≈" prefix
-  // below always applies.
+  // to decide and render it. Anything else (complex number, list, matrix, tuple, ...) still
+  // needs Giac's own latex(), but with every embedded decimal literal rounded first (see
+  // roundEmbeddedDecimals) so a list/matrix of decimals is digit-limited the same way a lone
+  // scalar is, and a bare top-level comma sequence wrapped in "(...)" (see wrapBareSequence -
+  // same reasoning as evaluate()'s own generic fallback) so it reads as the tuple/point it is.
+  // approxOut came from evalf(), so it's already inherently a rounded approximation regardless
+  // of roundForDisplay's/roundEmbeddedDecimals's own rounding - the "≈" prefix below always
+  // applies.
   const approxDisp = roundForDisplay(approxOut);
-  let latexOut = approxDisp ? approxDisp.latex : await fetchLatex(approxOut);
+  let approxRounded = null;
+  let approxWrapped = null;
+  let roundedOut = null;
+  if (!approxDisp) {
+    roundedOut = roundEmbeddedDecimals(approxOut);
+    approxWrapped = wrapBareSequence(roundedOut);
+    approxRounded = approxWrapped ?? roundedOut;
+  }
+  // Latexes the *unwrapped* sequence and adds the parens back by hand once there were any -
+  // see the matching comment in evaluate() above for why (Giac's own latex() drops a bare
+  // sequence's parens too).
+  let latexOut = approxDisp ? approxDisp.latex : await fetchLatex(roundedOut);
+  if (approxWrapped != null && latexOut != null) latexOut = `\\left(${latexOut}\\right)`;
   // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
   // unevaluated - see the matching comment in evaluate() above.
   if (isIndefiniteIntegral(normalized) && !isIndefiniteIntegral(out)) latexOut = appendArbitraryConstant(latexOut);
   return {
     raw: approxOut,
     isError: false,
-    text: `≈ ${approxDisp ? approxDisp.text : approxOut}`,
+    text: `≈ ${approxDisp ? approxDisp.text : approxRounded}`,
     latex: latexOut != null ? `\\approx ${latexOut}` : null,
     isGraphics: false,
   };
