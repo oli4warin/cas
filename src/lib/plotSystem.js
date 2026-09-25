@@ -6,7 +6,7 @@
 // parsing/math only - no engine calls here; see lib/plotSample.js's sampleSystem/
 // sampleComplexSystem for the actual grid evaluation and solve() round trips this builds on.
 
-import { collectFreeVariables } from './giac.js';
+import { collectFreeVariables, isFMaxFMinCall } from './giac.js';
 
 // Index/operator/length of the first top-level relational operator in `s` (outside any
 // (),[],{} nesting) - "<=", ">=", "!=", "<", ">", or a plain "=" (not ":=", "==", already
@@ -51,6 +51,10 @@ function formatVarList(allowedVars) {
 export function parseSystemLine(rawLine, definitions = new Map(), allowedVars = ['x', 'y']) {
   const line = rawLine.trim().replace(/;\s*$/, '').trim();
   const varList = formatVarList(allowedVars);
+  // fMax(...)/fMin(...) - even with a trailing "| condition" restriction, whose ">"/"<" would
+  // otherwise look like a top-level relation right here - is a command that computes a value,
+  // not an equation/inequality with a curve or region to plot. See isFMaxFMinCall in giac.js.
+  if (isFMaxFMinCall(line)) throw new Error(`"${line}" is not an equation or inequality in ${varList}.`);
   const rel = findTopLevelRelation(line);
   if (!rel) throw new Error(`"${line}" is not an equation or inequality in ${varList}.`);
   if (rel.op === '!=') throw new Error(`"${line}": "!=" can't be plotted as a curve or region.`);

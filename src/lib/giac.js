@@ -857,6 +857,23 @@ function rewriteExplicitSolveCallPipe(body) {
 // resolvePipeRestriction's usual best-effort handling below same as any other command.
 const FMAX_FMIN_COMMANDS = new Set(['fMax', 'fMin']);
 
+// True when `text` is headed by a bare "fMax(" or "fMin(" call - used by lib/plotSystem.js's
+// parseSystemLine to keep a line like "fMax(x-x^3,x) | x>0" from being mistaken for a
+// plottable inequality in x: its trailing "| x>0" restriction (see
+// isCompleteFMaxFMinCallWithTrailingPipe just below) sits at depth 0, outside the call's own
+// parens, so findTopLevelRelation there would otherwise find that ">" and read the whole line
+// as "fMax(x-x^3,x) | x > 0", an inequality whose lhs/rhs both happen to be free only in x.
+// fMax/fMin are commands that compute a value, never something with a curve/region of their
+// own to plot - checked head-only (not the full isCompleteFMaxFMinCallWithTrailingPipe shape)
+// so a bare "fMax(x-x^3,x)" with no restriction at all is excluded the same way, even though
+// that shape already has no top-level relation to misparse in the first place.
+export function isFMaxFMinCall(text) {
+  const s = (text ?? '').trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  const nameMatch = body.match(/^([A-Za-z_][A-Za-z0-9_]*)\(/);
+  return !!nameMatch && FMAX_FMIN_COMMANDS.has(nameMatch[1]);
+}
+
 function isCompleteFMaxFMinCallWithTrailingPipe(body) {
   const head = CALL_HEAD_RE.exec(body);
   if (!head || !FMAX_FMIN_COMMANDS.has(head[1])) return false;
