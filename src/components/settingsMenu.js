@@ -4,7 +4,7 @@ import { h } from '../lib/dom.js';
 // and plots alike, since they all share the one Giac session) - angle unit, whether
 // results are always numerically approximated instead of left exact, and how much
 // auto-simplification Giac applies after each evaluation.
-export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplifyChange, onTauModeChange, onThemeChange, onShowTextChange }) {
+export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplifyChange, onTauModeChange, onThemeChange, onShowTextChange, onDigitsChange }) {
   let open = false;
   let angleMode = 'RAD';
   let approx = false;
@@ -12,6 +12,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
   let tauMode = false;
   let showText = false;
   let theme = 'dark';
+  let digits = 6;
   let disabled = false;
 
   const root = h('div', { class: 'settings-menu' });
@@ -26,6 +27,17 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
   const piBtn = h('button', { type: 'button', onclick: () => onTauModeChange(false) }, 'π');
   const tauBtn = h('button', { type: 'button', onclick: () => onTauModeChange(true) }, 'τ');
   const showTextInput = h('input', { type: 'checkbox', onchange: (e) => onShowTextChange(e.target.checked) });
+  const digitsInput = h('input', {
+    type: 'number',
+    min: '1',
+    max: '15',
+    class: 'settings-menu__digits',
+    onchange: (e) => {
+      const next = Math.max(1, Math.min(15, Math.trunc(Number(e.target.value)) || 6));
+      e.target.value = String(next);
+      onDigitsChange(next);
+    },
+  });
   const themeThumb = h('span', { class: 'theme-switch__thumb' }, '☾');
   const themeSwitch = h(
     'button',
@@ -73,6 +85,12 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
       showTextInput,
     ),
     h(
+      'label',
+      { class: 'settings-menu__row' },
+      h('span', { class: 'settings-menu__label', title: 'Significant digits shown for an approximate numeric result - the full value is still used when copied' }, 'Digits'),
+      digitsInput,
+    ),
+    h(
       'div',
       { class: 'settings-menu__row' },
       h('span', { class: 'settings-menu__label' }, 'Theme'),
@@ -108,6 +126,8 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
     piBtn.disabled = disabled;
     tauBtn.disabled = disabled;
     showTextInput.checked = showText;
+    if (document.activeElement !== digitsInput) digitsInput.value = String(digits);
+    digitsInput.disabled = disabled;
     themeSwitch.classList.toggle('theme-switch--light', theme === 'light');
     themeSwitch.setAttribute('aria-checked', theme === 'light');
     themeThumb.textContent = theme === 'light' ? '☀' : '☾';
@@ -130,6 +150,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
     tauMode = state.tauMode;
     showText = state.showText;
     theme = state.theme;
+    digits = state.digits;
     disabled = state.disabled;
     render();
   }

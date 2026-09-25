@@ -13,6 +13,7 @@ import {
   setAutosimplifyLevel as giacSetAutosimplifyLevel,
   setTauMode as giacSetTauMode,
   setPauMode as giacSetPauMode,
+  setDigits as giacSetDigits,
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
@@ -87,6 +88,19 @@ function getInitialHintsVisible() {
   } catch {
     return false;
   }
+}
+
+// How many significant digits an approximate numeric result is displayed with (see the
+// "Digits" settings row and giac.js's setDigits) - a pure display preference, same as
+// tauMode, so it's persisted the same way and defaults to 6 when unset or unparsable.
+function getInitialDigits() {
+  try {
+    const stored = parseInt(localStorage.getItem('digits'), 10);
+    if (Number.isInteger(stored) && stored >= 1 && stored <= 15) return stored;
+  } catch {
+    // localStorage can throw in locked-down environments - fall through to the default below.
+  }
+  return 6;
 }
 
 // Flattens history into a single up/down browsing order: most recent output first, then
@@ -272,12 +286,16 @@ export function mountApp(root) {
     showText: getInitialShowText(),
     toolbarVisible: getInitialToolbarVisible(),
     hintsVisible: getInitialHintsVisible(),
+    digits: getInitialDigits(),
   };
   // Purely a display preference (see piToTau in giac.js - it never changes what's actually
   // computed, only how a pi-valued result is shown), so unlike angleMode/approxMode/
   // autosimplify below it needs no "re-apply once the engine is ready" step - giac.js's own
   // module-level flag just needs to start out matching the persisted value.
   giacSetTauMode(state.tauMode);
+  // Same story as tauMode above - digits only ever affects how a numeric result is rounded
+  // for display (see roundForDisplay in giac.js), never the engine's own computation.
+  giacSetDigits(state.digits);
 
   const sessionId = makeSessionId();
   // Snapshot of the rows/view being handed off to a popped-out window, taken at the
@@ -336,6 +354,7 @@ export function mountApp(root) {
     onTauModeChange: handleTauModeChange,
     onThemeChange: handleThemeChange,
     onShowTextChange: handleShowTextChange,
+    onDigitsChange: handleDigitsChange,
   });
   const variablesMenu = VariablesMenu({ onPurge: purgeVariable });
   const statusPill = h('span', { class: 'status-pill' });
@@ -574,6 +593,7 @@ export function mountApp(root) {
       tauMode: state.tauMode,
       showText: state.showText,
       theme: state.theme,
+      digits: state.digits,
       disabled: !engineReady || state.busy,
     });
 
@@ -1469,6 +1489,19 @@ export function mountApp(root) {
     }
     try {
       localStorage.setItem('tauMode', on ? '1' : '0');
+    } catch {
+      // Ignore - the preference just won't persist across reloads in this environment.
+    }
+    renderStatus();
+  }
+
+  // Same "display-only, from this point forward" story as tauMode above - an existing history
+  // entry keeps whatever text/latex it already computed at its own digit setting.
+  function handleDigitsChange(digits) {
+    state.digits = digits;
+    giacSetDigits(digits);
+    try {
+      localStorage.setItem('digits', String(digits));
     } catch {
       // Ignore - the preference just won't persist across reloads in this environment.
     }

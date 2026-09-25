@@ -247,6 +247,27 @@ export function normalizeInverseTrigAliases(expr) {
   return expandInverseTrigAliases(expr);
 }
 
+// Giac's bare "infinity" token is *unsigned* (complex) infinity, not +infinity - a distinct
+// value from the signed "-infinity"/"+infinity" a calculator user actually means when they type
+// it as a bound (confirmed against the actual engine, which itself warns "infinity is unsigned,
+// perhaps you meant +infinity" whenever it sees one). A single infinite bound still resolves
+// correctly despite the warning (e.g. integrate(1/(1+x^2),x,0,infinity) still gives pi/2), but
+// once *both* bounds are infinite - integrate(exp(-x^2),x,-infinity,infinity), the classic
+// Gaussian integral - Giac can no longer tell the bare upper "infinity" is meant to be the
+// positive side of the same real line as the signed "-infinity" lower bound, and silently
+// returns undef instead of sqrt(pi). Rewriting every bare, unsigned "infinity" to "+infinity" -
+// exactly what the engine's own warning suggests - fixes this at the source; every other
+// "infinity" spelling this app already special-cases (see isPositiveInfinityToken) already
+// treats a bare "infinity" as meaning +infinity, so this just makes the engine agree before it
+// ever evaluates the expression. Only a standalone token is rewritten - one already signed
+// ("-infinity", "+infinity") or immediately preceded by an identifier character (part of some
+// other name) is left alone.
+const BARE_INFINITY_RE = /(?<![+\-.\w])infinity\b/gi;
+
+export function normalizeBareInfinity(expr) {
+  return expr.replace(BARE_INFINITY_RE, '+infinity');
+}
+
 // A friendlier, calculator-style alias for `purge`: Giac has no bare "del <name>" command of
 // its own - typed as-is it just parses as the *product* of two undefined identifiers ("del"
 // and "a"), silently leaving "a" untouched instead of undefining it. Recognized only when it's
@@ -1263,7 +1284,12 @@ function labelSolveTuples(tuples, varNames) {
     return varNames
       .map((name, i) => {
         const value = values[i];
-        return hasTopLevelRelation(value) ? piToTau(value) : `${name}${suffix}=${piToTau(value)}`;
+        // roundEmbeddedDecimals here only reshapes the *displayed* clause text - `values`
+        // itself (what reinsertRaw/saveExpr are built from, see parseSolveSolutions/
+        // buildSaveAssignment) is never touched, so copying/saving a solution still gets
+        // Giac's full, unrounded numeric fallback value.
+        const display = roundEmbeddedDecimals(piToTau(value));
+        return hasTopLevelRelation(value) ? display : `${name}${suffix}=${display}`;
       })
       .join(' and ');
   });
@@ -1504,9 +1530,9 @@ function parseDesolveFuncName(sentExpr) {
 function formatDesolveResult(raw, funcName) {
   if (!funcName) return null;
   raw = reorderConstantRadicalSum(raw);
-  // `raw` itself stays pi-based (see piToTau's other call sites for why); only the
-  // displayed clause/text/latex use the tau-converted form.
-  const clause = `${funcName}=${piToTau(raw)}`;
+  // `raw` itself stays pi-based and unrounded (see piToTau's other call sites for why); only
+  // the displayed clause/text/latex use the tau-converted, digit-rounded form.
+  const clause = `${funcName}=${roundEmbeddedDecimals(piToTau(raw))}`;
   return { text: clause, latex: giacToLatex(clause) || null, raw };
 }
 
@@ -1721,6 +1747,17 @@ let pauMode = false;
 
 export function setPauMode(on) {
   pauMode = on;
+}
+
+// How many significant digits an approximate numeric result is ever *displayed* with (see the
+// "Digits" setting in app.js's settings menu). Purely a display-time rounding, same as tauMode
+// above - it never touches `raw` (what a result's own copy/reinsertion/save uses, see
+// reinsertableValue/saveable.js), only the text/latex shown for it, so copying a result always
+// gets Giac's full, unrounded computation regardless of this setting.
+let displayDigits = 6;
+
+export function setDigits(n) {
+  displayDigits = Math.max(1, Math.min(15, Math.trunc(n) || 6));
 }
 
 // Rewrites every "coefficient*pi" term in `s` (a piece of Giac syntax, e.g. a solve()
@@ -1996,13 +2033,6 @@ function fixMathrmProseText(latex) {
   return out;
 }
 
-// How many digits (integer digits for a large number, or leading zeros past the point before
-// the first significant digit for a small one) an approximate result can show in full before
-// switching to scientific notation - e.g. 1234567 (7 digits) or 0.0000001 (first significant
-// digit 7 places after the point) both exceed it, while 123456 and 0.000001 (6 either way)
-// don't.
-const APPROX_SCI_DIGIT_LIMIT = 6;
-
 // Parses a plain Giac number string - "4000000", "-0.00000001", or already-scientific like
 // "1.2e-06" - into its exact (string/BigInt-only, so never lossy for arbitrarily large/small
 // numbers) normalized-scientific decomposition: the signed significant digits and the decimal
@@ -2022,14 +2052,6 @@ function parseDecimal(str) {
   return { sign: signStr, sig, exponent };
 }
 
-// The most significant digits an approximate result's mantissa is ever shown with - matches
-// Giac's own default display precision (e.g. its "6.91570797214e+19" already has exactly this
-// many). Without a cap, an exact value with far more known digits than that - a huge power or
-// factorial - would dump its entire digit string into the mantissa (a many-thousand-digit
-// factorial's scientific form would have a many-thousand-digit "mantissa", same problem in a
-// different shape), which is exactly the wall of digits scientific notation exists to avoid.
-const APPROX_SCI_PRECISION = 12;
-
 // Rounds a digit string to `precision` significant digits (round-half-up), returning the
 // (possibly shorter, trailing-zero-trimmed) result and the exponent adjustment a carry out of
 // the leading digit needs (e.g. rounding "999999999999" + next digit "9" up by one digit).
@@ -2046,24 +2068,60 @@ function roundSignificantDigits(sig, exponent, precision) {
   return { sig: roundedStr.replace(/0+$/, '') || '0', exponent };
 }
 
-// Forces a plain decimal/integer approximate result into scientific-notation LaTeX once it
-// has more than APPROX_SCI_DIGIT_LIMIT digits - Giac's own latex() only switches at a much
-// higher, fixed precision threshold, so a run-of-the-mill approximate result like 1e9 or 1e-8
-// would otherwise print every digit out in full. Returns null (meaning: display unchanged)
-// when `str` isn't a single plain number, or is one but doesn't cross the threshold. Otherwise
-// returns { latex, rounded } - `rounded` says whether fitting it to APPROX_SCI_PRECISION
-// significant digits actually dropped real (nonzero) digits, e.g. for an exact value (a big
-// power or factorial) whose full digit string is known but far longer than that - callers
-// showing such a value with "=" need to know to fall back to "≈" instead once that happens.
-function formatApproxSci(str) {
+// Renders a rounded (sign,sig,exponent) triple (see parseDecimal/roundSignificantDigits) back
+// into a plain decimal/integer string, e.g. ('', '333333', -1) -> "0.333333", ('-', '125', 2)
+// -> "-125", ('', '125', 4) -> "125000". Trailing zeros needed to reach the decimal point for a
+// large exponent are the only zeros ever added - `sig` itself is already trailing-zero-trimmed
+// by roundSignificantDigits, so this never fabricates trailing fractional zeros.
+function sigToPlainDecimal(sign, sig, exponent) {
+  if (exponent < 0) return `${sign}0.${'0'.repeat(-exponent - 1)}${sig}`;
+  if (exponent + 1 >= sig.length) return `${sign}${sig}${'0'.repeat(exponent + 1 - sig.length)}`;
+  return `${sign}${sig.slice(0, exponent + 1)}.${sig.slice(exponent + 1)}`;
+}
+
+// Rounds `str` (a plain decimal/integer, or Giac's own scientific form) to `displayDigits`
+// significant figures for *display only* - see displayDigits above for why this never touches
+// the value a result is copied/reinserted/saved as (that's always `raw`, computed straight from
+// Giac with no rounding). Returns null (meaning: not a single plain real number - an equation,
+// list, matrix, complex number, ... - left to Giac's own latex()/text instead) when `str` isn't
+// one, parseDecimal's own signal for that. Otherwise returns { text, latex, rounded }: `text`/
+// `latex` are the same rounded value, formatted as a plain decimal or, once the rounded
+// magnitude needs more integer digits/leading zeros than displayDigits shows, in scientific
+// notation (latex via sciLatex, text as a plain "1.23457e+19" fallback); `rounded` says whether
+// displaying it at this precision actually dropped real (nonzero) digits, so callers can show
+// "≈" instead of "=" once it did (mirrors this same distinction from formatApproxSci's original
+// scientific-only version).
+function roundForDisplay(str) {
   const parsed = parseDecimal(str);
   if (!parsed) return null;
   let { sign, sig, exponent } = parsed;
-  if (exponent < APPROX_SCI_DIGIT_LIMIT && exponent > -(APPROX_SCI_DIGIT_LIMIT + 1)) return null;
-  const rounded = sig.length > APPROX_SCI_PRECISION;
-  ({ sig, exponent } = roundSignificantDigits(sig, exponent, APPROX_SCI_PRECISION));
-  const mantissa = sign + sig[0] + (sig.length > 1 ? `.${sig.slice(1)}` : '');
-  return { latex: sciLatex(mantissa, exponent), rounded };
+  const rounded = sig.length > displayDigits;
+  ({ sig, exponent } = roundSignificantDigits(sig, exponent, displayDigits));
+  if (exponent >= displayDigits || exponent <= -(displayDigits + 1)) {
+    const mantissa = sign + sig[0] + (sig.length > 1 ? `.${sig.slice(1)}` : '');
+    return { text: `${mantissa}e${exponent >= 0 ? '+' : ''}${exponent}`, latex: sciLatex(mantissa, exponent), rounded };
+  }
+  const text = sigToPlainDecimal(sign, sig, exponent);
+  return { text, latex: text, rounded };
+}
+
+// Rounds every embedded decimal-point number literal in a Giac-syntax string to displayDigits
+// significant digits (see roundForDisplay) - unlike roundForDisplay itself, `s` doesn't have to
+// *be* a single bare number, just contain one or more somewhere in otherwise-arbitrary Giac
+// syntax (a solve() clause like "x=-0.380848513295377192923057620676605285938427..."). Only
+// decimal-point literals are touched - a plain integer is always exact syntax as typed/computed
+// and never needs it. This is what keeps solve()/fMax()/fMin()'s own numeric fallback (used
+// when they can't find a symbolic answer, e.g. a quartic with no nice roots) from dumping
+// dozens of digits into an otherwise-exact result: Giac's exact() never itself introduces a
+// decimal literal into a genuinely symbolic expression (exact(0.5) is 1/2, not 0.5), so any
+// decimal literal found this way is already an approximation, however this string ends up
+// labeled. Each match's rounded form (see roundForDisplay) is valid Giac syntax right back in
+// place - a plain decimal, or "1.23e+6"-style scientific, which giacToLatex's own
+// fixScientificNotation already knows how to render - so the result can be fed to giacToLatex
+// exactly like the original.
+const EMBEDDED_DECIMAL_RE = /-?\d+\.\d+(?:e[+-]?\d+)?/gi;
+function roundEmbeddedDecimals(s) {
+  return s.replace(EMBEDDED_DECIMAL_RE, (m) => roundForDisplay(m)?.text ?? m);
 }
 
 // True when `a` and `b` are literally the same number - compares their normalized
@@ -2076,16 +2134,18 @@ export function sameNumericValue(a, b) {
 }
 
 // Builds an evaluateApprox() result for a value that's known exact (a plain integer, or a
-// fraction whose decimal expansion terminates) - "≈" only appears when formatApproxSci had to
-// round its mantissa down to APPROX_SCI_PRECISION digits to display it in scientific
-// notation (e.g. a huge power or factorial), same as it would for a genuinely rounded value
-// like 17/3; otherwise `str` is shown as-is, with no marker, since nothing was lost.
+// fraction whose decimal expansion terminates) - "≈" only appears when roundForDisplay had to
+// round it down to displayDigits significant digits to show it (e.g. a huge power or
+// factorial, or just more decimal places than displayDigits allows), same as it would for a
+// genuinely rounded value like 17/3; otherwise the full value is shown, with no marker, since
+// nothing was lost.
 function exactNumberResult(str) {
-  const sci = formatApproxSci(str);
-  if (sci?.rounded) {
-    return { raw: str, isError: false, text: `≈ ${str}`, latex: `\\approx ${sci.latex}`, isGraphics: false };
+  const disp = roundForDisplay(str);
+  if (!disp) return { raw: str, isError: false, text: str, latex: str, isGraphics: false };
+  if (disp.rounded) {
+    return { raw: str, isError: false, text: `≈ ${disp.text}`, latex: `\\approx ${disp.latex}`, isGraphics: false };
   }
-  return { raw: str, isError: false, text: str, latex: sci ? sci.latex : str, isGraphics: false };
+  return { raw: str, isError: false, text: disp.text, latex: disp.latex, isGraphics: false };
 }
 
 // Giac's own latex() wraps a sqrt() in a redundant "\left(...\right)" pair whenever it's
@@ -2233,11 +2293,11 @@ function formatNormalCdfResult(displayValue, isExact, parsed) {
     bodyText = `${lower}≤${distText}≤${upper}`;
   }
 
-  const sci = formatApproxSci(displayValue);
-  const exact = isExact && !sci?.rounded;
+  const disp = roundForDisplay(displayValue);
+  const exact = isExact && !disp?.rounded;
   return {
-    text: `P(${bodyText})${exact ? '=' : '≈'}${displayValue}`,
-    latex: `\\mathrm{P}(${bodyLatex})${exact ? '=' : '\\approx'}${sci ? sci.latex : displayValue}`,
+    text: `P(${bodyText})${exact ? '=' : '≈'}${disp ? disp.text : displayValue}`,
+    latex: `\\mathrm{P}(${bodyLatex})${exact ? '=' : '\\approx'}${disp ? disp.latex : displayValue}`,
   };
 }
 
@@ -2379,13 +2439,13 @@ async function evaluateOtherDistributionCdf(sentExpr) {
     bodyText = `${lower}≤${symbolText}≤${upper}`;
   }
 
-  const sci = formatApproxSci(displayValue);
-  const exact = isExact && !sci?.rounded;
+  const disp = roundForDisplay(displayValue);
+  const exact = isExact && !disp?.rounded;
   return {
     raw: displayValue,
     isError: false,
-    text: `P(${bodyText})${exact ? '=' : '≈'}${displayValue}`,
-    latex: `\\mathrm{P}(${bodyLatex})${exact ? '=' : '\\approx'}${sci ? sci.latex : displayValue}`,
+    text: `P(${bodyText})${exact ? '=' : '≈'}${disp ? disp.text : displayValue}`,
+    latex: `\\mathrm{P}(${bodyLatex})${exact ? '=' : '\\approx'}${disp ? disp.latex : displayValue}`,
     isGraphics: false,
   };
 }
@@ -2400,8 +2460,10 @@ export async function evaluate(expr, definitions) {
   const regressionCall = parseRegressionCall(expr);
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
-  const sentExpr = normalizePowerCalls(
-    normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
+  const sentExpr = normalizeBareInfinity(
+    normalizePowerCalls(
+      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
+    ),
   );
 
   // normald_cdf's *exact* answer is an erf()-based expression - correct, but far more
@@ -2471,25 +2533,25 @@ export async function evaluate(expr, definitions) {
     const leftLatex = await fetchLatex(exactPartDisplay);
     if (exactDecimal) {
       // Our own recomputed decimal is verified exact, but displaying it can still mean
-      // rounding it for the mantissa (see formatApproxSci) once it has more significant
-      // digits than an approximate display ever shows - "=" is only honest when that didn't
-      // happen; otherwise it's "≈" the same as the non-terminating case just below.
-      const sci = formatApproxSci(exactDecimal);
-      const approxDisplay = sci?.rounded;
+      // rounding it down to displayDigits significant digits once it has more of them than
+      // that shows (see roundForDisplay) - "=" is only honest when that didn't happen;
+      // otherwise it's "≈" the same as the non-terminating case just below.
+      const disp = roundForDisplay(exactDecimal);
+      const approxDisplay = disp?.rounded;
       return {
         raw: out,
         isError: false,
-        text: `${exactPartDisplay} = ${exactDecimal}`,
-        latex: leftLatex != null ? `${leftLatex} ${approxDisplay ? '\\approx' : '='} ${sci ? sci.latex : exactDecimal}` : null,
+        text: `${exactPartDisplay} ${approxDisplay ? '≈' : '='} ${disp ? disp.text : exactDecimal}`,
+        latex: leftLatex != null ? `${leftLatex} ${approxDisplay ? '\\approx' : '='} ${disp ? disp.latex : exactDecimal}` : null,
         isGraphics: false,
       };
     }
-    const decimalSci = formatApproxSci(decimalPart);
+    const decimalDisp = roundForDisplay(decimalPart);
     return {
       raw: out,
       isError: false,
-      text: `${exactPartDisplay} ≈ ${decimalPart}`,
-      latex: leftLatex != null ? `${leftLatex} \\approx ${decimalSci ? decimalSci.latex : decimalPart}` : null,
+      text: `${exactPartDisplay} ≈ ${decimalDisp ? decimalDisp.text : decimalPart}`,
+      latex: leftLatex != null ? `${leftLatex} \\approx ${decimalDisp ? decimalDisp.latex : decimalPart}` : null,
       isGraphics: false,
     };
   }
@@ -2627,22 +2689,28 @@ const AND_LATEX_JOINER = '\\ \\text{and}\\ ';
 // evalf()'d form as-is, same as formatSolveResult's exact path does for its un-evalf'd one -
 // no "=" or "≈" marker, since the value already says which variable it constrains.
 function formatSolveValueFragment(name, exactValue, approxValue) {
+  // roundEmbeddedDecimals below only ever reshapes the *displayed* text/latex - the returned
+  // `value` (what reinsertTuples/saveExpr are built from, see formatSolveResultApprox) always
+  // stays whichever of exactValue/approxValue Giac actually gave, unrounded.
   if (hasTopLevelRelation(exactValue)) {
-    return { value: approxValue, text: approxValue, latex: giacToLatex(approxValue) };
+    const display = roundEmbeddedDecimals(approxValue);
+    return { value: approxValue, text: display, latex: giacToLatex(display) };
   }
 
   const rational = parseExactRational(exactValue);
   const exactDecimal = rational && rational.den !== 1n ? terminatingDecimalString(rational.num, rational.den) : null;
   if (rational && (rational.den === 1n || (exactDecimal && sameNumericValue(exactDecimal, approxValue)))) {
     const value = rational.den === 1n ? exactValue : exactDecimal;
-    return { value, text: `${name}=${value}`, latex: giacToLatex(`${name}=${value}`) };
+    const display = roundEmbeddedDecimals(value);
+    return { value, text: `${name}=${display}`, latex: giacToLatex(`${name}=${display}`) };
   }
 
+  const display = roundEmbeddedDecimals(approxValue);
   const nameLatex = giacToLatex(name);
-  const valueLatex = giacToLatex(approxValue);
+  const valueLatex = giacToLatex(display);
   return {
     value: approxValue,
-    text: `${name} ≈ ${approxValue}`,
+    text: `${name} ≈ ${display}`,
     latex: nameLatex != null && valueLatex != null ? `${nameLatex} \\approx ${valueLatex}` : null,
   };
 }
@@ -2714,8 +2782,10 @@ export async function evaluateApprox(expr, definitions) {
   const regressionCall = parseRegressionCall(expr);
   if (regressionCall) return evaluateRegression(regressionCall.name, regressionCall.xExpr, regressionCall.yExpr);
 
-  const normalized = normalizePowerCalls(
-    normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
+  const normalized = normalizeBareInfinity(
+    normalizePowerCalls(
+      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
+    ),
   );
 
   // Same erf()-avoiding short-circuit as evaluate() above - see evaluateNormalCdf.
@@ -2758,10 +2828,10 @@ export async function evaluateApprox(expr, definitions) {
     if (parseDecimal(decimalPart) == null || (rational && rational.den === 1n)) {
       // Either Giac's own preview carries no real information (it overflowed to
       // "infinity"/"undef" for a huge exact value), or it's a plain integer - the
-      // plain-integer branch below already gives an equivalent, full-precision
-      // scientific-notation preview (via formatApproxSci) once one is actually needed, so
-      // Giac's own rounded stand-in would just be redundant. Either way, drop the tail and
-      // format `exactPart` itself below instead.
+      // plain-integer branch below already gives an equivalent, full-precision rounded
+      // preview (via roundForDisplay) once one is actually needed, so Giac's own rounded
+      // stand-in would just be redundant. Either way, drop the tail and format `exactPart`
+      // itself below instead.
       out = exactPart;
     } else {
       const exactDecimal = rational && terminatingDecimalString(rational.num, rational.den);
@@ -2770,8 +2840,8 @@ export async function evaluateApprox(expr, definitions) {
       }
       // Doesn't terminate (or isn't a plain rational at all, e.g. sqrt(2)) - Giac's own
       // rounded decimal is the best we can show, so mark it as approximate.
-      const decimalSci = formatApproxSci(decimalPart);
-      return { raw: decimalPart, isError: false, text: `≈ ${decimalPart}`, latex: `\\approx ${decimalSci ? decimalSci.latex : decimalPart}`, isGraphics: false };
+      const decimalDisp = roundForDisplay(decimalPart);
+      return { raw: decimalPart, isError: false, text: `≈ ${decimalDisp ? decimalDisp.text : decimalPart}`, latex: `\\approx ${decimalDisp ? decimalDisp.latex : decimalPart}`, isGraphics: false };
     }
   }
 
@@ -2847,20 +2917,20 @@ export async function evaluateApprox(expr, definitions) {
     };
   }
 
-  // A bare number is handled without a Giac round-trip - formatApproxSci already has enough
+  // A bare number is handled without a Giac round-trip - roundForDisplay already has enough
   // to decide and render it. Anything else (complex number, list, matrix, ...) still needs
   // Giac's own latex() as before. approxOut came from evalf(), so it's already inherently a
-  // rounded approximation regardless of formatApproxSci's own `rounded` flag - the "≈" prefix
+  // rounded approximation regardless of roundForDisplay's own `rounded` flag - the "≈" prefix
   // below always applies.
-  const approxSci = formatApproxSci(approxOut);
-  let latexOut = approxSci ? approxSci.latex : await fetchLatex(approxOut);
+  const approxDisp = roundForDisplay(approxOut);
+  let latexOut = approxDisp ? approxDisp.latex : await fetchLatex(approxOut);
   // Skip "+C" when Giac couldn't find a closed form and just echoed the integral back
   // unevaluated - see the matching comment in evaluate() above.
   if (isIndefiniteIntegral(normalized) && !isIndefiniteIntegral(out)) latexOut = appendArbitraryConstant(latexOut);
   return {
     raw: approxOut,
     isError: false,
-    text: `≈ ${approxOut}`,
+    text: `≈ ${approxDisp ? approxDisp.text : approxOut}`,
     latex: latexOut != null ? `\\approx ${latexOut}` : null,
     isGraphics: false,
   };
