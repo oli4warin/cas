@@ -2629,6 +2629,97 @@ async function evaluateDomain(domainCall, sentExpr) {
   return { raw: out, isError: false, text: out, latex: null, isGraphics: false };
 }
 
+// Recognizes a top-level asymptote(expr,var) call - a command this app adds itself (Giac has
+// no native "asymptote" - typing it at the engine just echoes the call back unevaluated,
+// confirmed against the real engine) - and returns its expression/variable text, or null if
+// `sentExpr` isn't shaped like one. Mirrors parseDomainCall above.
+function parseAsymptoteCall(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  if (!/^asymptote\(/i.test(body) || !body.endsWith(')')) return null;
+  const openIdx = body.indexOf('(');
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',').map((a) => a.trim());
+  if (args.length !== 2 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(args[1])) return null;
+  return { expr: args[0], varName: args[1] };
+}
+
+// True when a limit() result isn't a plain finite value - it diverged ("+infinity"/
+// "-infinity"), doesn't exist ("undef"), oscillates ("bounded_function(...)", Giac's own way
+// of saying a limit like limit(sin(x),x,+infinity) has no single value), or the call itself
+// errored - any of which means there's no slant asymptote on that side.
+function isNonFiniteLimit(s) {
+  const t = s.trim();
+  return t.startsWith('GIAC_ERROR') || /infinity|undef|bounded_function/i.test(t);
+}
+
+// Computes the slant ("schiefe") asymptote y=mx+b of `expr` as `varName` -> `dir`
+// ("+infinity"/"-infinity"), via the standard definition m = lim(f/x), b = lim(f-mx) - both
+// taken as `varName` -> `dir`. Returns {m,b} (raw Giac expression text, not yet simplified/
+// combined), {horizontal:true} if m comes out exactly 0 (f flattens to a constant - a
+// horizontal asymptote, not an oblique one - see evaluateAsymptote), or null if either limit
+// isn't a plain finite value (see isNonFiniteLimit) - meaning `expr` has no asymptote at all
+// on this side (e.g. a polynomial of degree >= 2, or an oscillating function like sin(x)).
+async function computeAsymptoteSide(exprText, varName, dir) {
+  const mOut = stripTrailingSemicolon(await rawEvalAsync(`limit((${exprText})/${varName},${varName},${dir})`));
+  if (isNonFiniteLimit(mOut)) return null;
+  const m = reinsertableValue(mOut);
+  if (m.trim() === '0') return { horizontal: true };
+  const bOut = stripTrailingSemicolon(await rawEvalAsync(`limit((${exprText})-(${m})*${varName},${varName},${dir})`));
+  if (isNonFiniteLimit(bOut)) return null;
+  return { m, b: reinsertableValue(bOut) };
+}
+
+// Evaluates an asymptote(expr,var) call (see parseAsymptoteCall) into its slant asymptote,
+// on both sides (+infinity/-infinity) at once, since a function can have a different one on
+// each side (e.g. sqrt(x^2+1) is asymptotic to y=x as x->+infinity but y=-x as x->-infinity -
+// confirmed against the engine). Returns the evaluate()-shaped result object - two "y=..."
+// lines (each labeled with its side) when the two sides differ, one unlabeled line when they
+// agree (the common case for a rational function), or a "keine schiefe Asymptote" message
+// when neither side has one - or null if `sentExpr` isn't an asymptote() call at all, so the
+// caller falls back to its own generic path.
+async function evaluateAsymptote(asymptoteCall) {
+  if (!asymptoteCall) return null;
+  const { expr: exprText, varName } = asymptoteCall;
+  const plusRaw = await computeAsymptoteSide(exprText, varName, '+infinity');
+  const minusRaw = await computeAsymptoteSide(exprText, varName, '-infinity');
+  const plus = plusRaw && !plusRaw.horizontal ? plusRaw : null;
+  const minus = minusRaw && !minusRaw.horizontal ? minusRaw : null;
+
+  if (!plus && !minus) {
+    return {
+      raw: null,
+      isError: false,
+      text: 'Keine schiefe Asymptote',
+      latex: '\\text{Keine schiefe Asymptote}',
+      isGraphics: false,
+    };
+  }
+
+  const agree = plus && minus && plus.m === minus.m && plus.b === minus.b;
+  const sides = agree ? [{ ...plus, dir: null }] : [plus && { ...plus, dir: '+' }, minus && { ...minus, dir: '-' }].filter(Boolean);
+
+  const clauses = [];
+  for (const { m, b, dir } of sides) {
+    const combinedOut = stripTrailingSemicolon(await rawEvalAsync(`simplify((${m})*${varName}+(${b}))`));
+    if (combinedOut.startsWith('GIAC_ERROR')) return null;
+    const combined = reinsertableValue(combinedOut);
+    const rhsLatex = giacToLatex(combined);
+    if (rhsLatex == null) return null;
+    const dirLatex = dir ? `\\ \\ (${varName} \\to ${dir}\\infty)` : '';
+    const dirText = dir ? ` (${varName}→${dir}∞)` : '';
+    clauses.push({ raw: combined, text: `y=${combined}${dirText}`, latex: `y = ${rhsLatex}${dirLatex}` });
+  }
+
+  return {
+    raw: clauses.length === 1 ? clauses[0].raw : clauses.map((c) => c.raw).join(' and '),
+    isError: false,
+    text: clauses.map((c) => c.text).join('\n'),
+    latex: clauses.length === 1 ? clauses[0].latex : renderGatheredLatex(clauses),
+    isGraphics: false,
+  };
+}
+
 // Evaluate one line of Xcas input. Returns a promise for:
 //   { raw, isError, text, latex, isGraphics }
 // - raw: the string Giac returned, untouched - except a single-solution solve() result,
@@ -2663,6 +2754,12 @@ export async function evaluate(expr, definitions) {
   // evaluateDomain's own comment for why), so it's short-circuited here too.
   const domainResult = await evaluateDomain(parseDomainCall(sentExpr), sentExpr);
   if (domainResult) return domainResult;
+
+  // asymptote() isn't a Giac command at all (see parseAsymptoteCall) - it's computed here
+  // from scratch via limit(), so it has to be short-circuited ahead of the generic
+  // rawEvalAsync(sentExpr) call below rather than ever being sent to the engine as-is.
+  const asymptoteResult = await evaluateAsymptote(parseAsymptoteCall(sentExpr));
+  if (asymptoteResult) return asymptoteResult;
 
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
@@ -3014,6 +3111,10 @@ export async function evaluateApprox(expr, definitions) {
   // against the engine: evalf(x<>0) => true too), so it never gets a chance to reach it.
   const domainResult = await evaluateDomain(parseDomainCall(normalized), normalized);
   if (domainResult) return domainResult;
+
+  // Same idea, generalized to asymptote() - see evaluateAsymptote's own comment.
+  const asymptoteResult = await evaluateAsymptote(parseAsymptoteCall(normalized));
+  if (asymptoteResult) return asymptoteResult;
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
