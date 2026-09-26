@@ -494,6 +494,13 @@ function renderCall(node) {
     return `\\binom{${a(0)}}{${a(1)}}`;
   }
 
+  // cross(a,b)/dot(a,b) - vector cross/dot product, rendered as the standard infix operators
+  // rather than the generic \operatorname(...) call form below. Only for the 2-argument shape;
+  // a 3rd argument (or none) isn't a product these commands actually accept, so that falls
+  // through to the generic rendering same as any other unrecognized arg count.
+  if (lname === 'cross' && has(1) && !has(2)) return `${a(0)} \\times ${a(1)}`;
+  if (lname === 'dot' && has(1) && !has(2)) return `${a(0)} \\cdot ${a(1)}`;
+
   return `${operatorLabel(name)}${primes}\\left(${args.map((x) => (x != null ? render(x) : '')).join(',\\ ')}\\right)`;
 }
 

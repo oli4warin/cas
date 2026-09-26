@@ -621,14 +621,27 @@ function parsePipeAssignments(pipeRhs) {
 // needs to treat them differently for fsolve specifically (see its own comment): 'pin' for a
 // parameter substitution, 'condition' for a folded-in filter equation, 'none' when there was no
 // top-level "|" at all.
-function resolvePipeRestriction(text) {
+function resolvePipeRestriction(text, definitions = new Map()) {
   const pipeIdx = findTopLevelPipeIndex(text);
   if (pipeIdx === -1) return { text, changed: false, addedVars: [], kind: 'none' };
   const eqPart = text.slice(0, pipeIdx);
   const pipeRhs = text.slice(pipeIdx + 1);
   const assignments = parsePipeAssignments(pipeRhs);
   if (assignments) {
-    const substituted = substituteParams(eqPart, assignments.map((a) => a.name), assignments.map((a) => a.value));
+    // A pin can name a parameter that's only free *inside* a defined function's own body
+    // ("f(x)|a=1 and b=3" for f(x):=a*x+b) - "a"/"b" never appear literally in the call site
+    // "f(x)" itself, so substituteParams below would find nothing to replace and silently
+    // drop the pin. Expanding known calls first (see expandKnownFunctionCalls) surfaces the
+    // body's own free variables ("f(x)" becomes "(a*(x)+b)") so the pin has something to bite
+    // on; a pin whose name already appears literally (e.g. "x" in "f(x)|x=3", or any plain
+    // expression with no function call at all) is unaffected by this, since expanding a call
+    // whose params are pinned by name elsewhere doesn't change which literal names remain.
+    const expandedEqPart = expandKnownFunctionCalls(eqPart, definitions);
+    const substituted = substituteParams(
+      expandedEqPart,
+      assignments.map((a) => a.name),
+      assignments.map((a) => a.value),
+    );
     return { text: substituted, changed: true, addedVars: [], kind: 'pin' };
   }
   const existingVars = new Set(collectFreeVariables(eqPart, new Map()));
@@ -839,7 +852,7 @@ const CALL_HEAD_RE = /^([A-Za-z_][A-Za-z0-9_]*)\(/;
 // fsolve's own handling of a literal "|" left in its argument has at least been observed to
 // ignore it and still return the unrestricted root, a less actively-wrong fallback than a
 // confidently empty or nonsensical result.
-function rewriteExplicitSolveCallPipe(body) {
+function rewriteExplicitSolveCallPipe(body, definitions = new Map()) {
   const head = CALL_HEAD_RE.exec(body);
   if (!head || !SOLVE_LIKE_COMMANDS.has(head[1])) return null;
   const openIdx = head[0].length - 1;
@@ -852,11 +865,11 @@ function rewriteExplicitSolveCallPipe(body) {
   let restriction;
   if (close === body.length - 1) {
     if (findTopLevelPipeIndex(args[0]) === -1) return null;
-    restriction = resolvePipeRestriction(args[0]);
+    restriction = resolvePipeRestriction(args[0], definitions);
   } else {
     const rest = body.slice(close + 1).trim();
     if (!rest.startsWith('|')) return null;
-    restriction = resolvePipeRestriction(`${args[0]}|${rest.slice(1).trim()}`);
+    restriction = resolvePipeRestriction(`${args[0]}|${rest.slice(1).trim()}`, definitions);
   }
   if (funcName === 'fsolve' && restriction.kind === 'condition') return false;
 
@@ -958,7 +971,7 @@ export function wrapBareEquation(expr, definitions = new Map()) {
   // call the user typed by hand - `body`'s own "|" then sits at depth > 0 (inside that call's
   // parens), invisible to findTopLevelPipeIndex just below, so it's handled separately here
   // first. See rewriteExplicitSolveCallPipe above.
-  const explicitCallRewrite = rewriteExplicitSolveCallPipe(body);
+  const explicitCallRewrite = rewriteExplicitSolveCallPipe(body, definitions);
   if (explicitCallRewrite === false) return expr;
   if (explicitCallRewrite != null) return hasSemi ? `${explicitCallRewrite};` : explicitCallRewrite;
 
@@ -973,7 +986,7 @@ export function wrapBareEquation(expr, definitions = new Map()) {
   // resolvePipeRestriction above for why each is handled the way it is. Either way, this always
   // continues into the ordinary equation-detection below on the resolved text, rather than
   // handing anything back to Giac unresolved.
-  const pipeRestriction = resolvePipeRestriction(body);
+  const pipeRestriction = resolvePipeRestriction(body, definitions);
   body = pipeRestriction.text;
 
   let equationsText = null;

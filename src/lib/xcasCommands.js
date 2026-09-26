@@ -75,6 +75,7 @@ export const XCAS_COMMANDS = {
   fMax: 'function maximum',
   fMin: 'function minimum',
   desolve: 'solve a differential equation',
+  asymptote: 'calculates the asymptote',
 
   // Linear algebra
   det: 'determinant',
