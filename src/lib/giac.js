@@ -1406,11 +1406,24 @@ function parseCertificateOfExistence(raw, varNames) {
   return tuples && tuples.length === 1 ? tuples : null;
 }
 
+// solve() (and fsolve/zeros/czeros) represent "no solutions" as a bare empty list - "[]", or
+// "list[]" from solve()/csolve() - which is exactly the shape parseSolveTuples's own "empty
+// inner" check (see its comment above) already rejects, so without this it falls all the way
+// through formatSolveResult to the generic fallback and renders as Giac's raw, near-invisible
+// empty brackets. Matched literally against the two shapes Giac actually emits, rather than
+// reusing parseSolveTuples's own emptiness check directly, since that check also rejects other
+// shapes (e.g. malformed input) it isn't safe to relabel this way.
+function isEmptySolveList(raw) {
+  const trimmed = raw.trim();
+  return trimmed === '[]' || trimmed === 'list[]';
+}
+
 // Builds the {text, latex} pair for a solve() result once it's known which variables solve()
 // was given (see parseSolveVarList) - shared by evaluate() and both spots in evaluateApprox()
 // that need it. Returns null (meaning: fall back to Giac's own rendering) whenever `varNames`
-// is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions) or its
-// "certificate of existence" numeric fallback (see parseCertificateOfExistence). `saveExpr`
+// is null or `raw` isn't actually shaped like a solve() result (see parseSolveSolutions), its
+// "certificate of existence" numeric fallback (see parseCertificateOfExistence), or an empty
+// solution list (see isEmptySolveList). `saveExpr`
 // (see buildSaveAssignment) is the entry's own "save" button's assignment statement, or null
 // when this result isn't a plain enough value to save - always null for the certificate case,
 // since a witness point isn't the full solution set and shouldn't be offered as one to save.
@@ -1436,6 +1449,10 @@ function formatSolveResult(raw, varNames) {
       raw,
       saveExpr: null,
     };
+  }
+
+  if (varNames && isEmptySolveList(raw)) {
+    return { text: 'no solutions', latex: '\\text{no solutions}', raw, saveExpr: null };
   }
 
   return null;
