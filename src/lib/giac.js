@@ -2427,6 +2427,171 @@ async function evaluateOtherDistributionCdf(sentExpr) {
   };
 }
 
+// Recognizes a top-level domain(expr,var) call and returns its variable name, or null if
+// `sentExpr` isn't shaped like one. Mirrors parseNormalCdfCall above.
+function parseDomainCall(sentExpr) {
+  const s = sentExpr.trim();
+  const body = s.endsWith(';') ? s.slice(0, -1) : s;
+  if (!/^domain\(/i.test(body) || !body.endsWith(')')) return null;
+  const openIdx = body.indexOf('(');
+  if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
+  const args = splitTopLevel(body.slice(openIdx + 1, -1), ',').map((a) => a.trim());
+  if (args.length !== 2 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(args[1])) return null;
+  return { varName: args[1] };
+}
+
+// Returns the content of `s` if it's fully wrapped in one `open`/`close` pair spanning its
+// entire length (the opening bracket's own match is the very last character), or null
+// otherwise - used to peel Giac's outer "[...]" (union-of-pieces list) or redundant "(...)"
+// off a domain() result before it's split into clauses.
+function stripFullWrap(s, open, close) {
+  if (s[0] !== open || s[s.length - 1] !== close) return null;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      depth--;
+      if (depth === 0) return i === s.length - 1 ? s.slice(1, -1) : null;
+    }
+  }
+  return null;
+}
+
+function stripOuterParens(s) {
+  let inner = stripFullWrap(s, '(', ')');
+  while (inner != null) {
+    s = inner;
+    inner = stripFullWrap(s, '(', ')');
+  }
+  return s;
+}
+
+const DOMAIN_RELATION_RE = /^([A-Za-z_][A-Za-z0-9_]*)\s*(<>|>=|<=|>|<)\s*(.+)$/;
+
+// Parses one atomic relation out of a domain() clause (e.g. "x<=-1" or "(x<>1)") - returns
+// its operator and bound value (with any redundant wrapping parens of its own stripped), or
+// null if `clause` isn't a relation on `varName`.
+function parseDomainClause(clause, varName) {
+  const m = DOMAIN_RELATION_RE.exec(stripOuterParens(clause.trim()));
+  if (!m || m[1] !== varName) return null;
+  return { op: m[2], value: stripOuterParens(m[3].trim()) };
+}
+
+// Parses one comma/or-separated alternative of a domain() result - either the bare variable
+// itself (Giac's way of saying "no restriction at all", e.g. domain(x^2,x) => "x") or an
+// "and"-chain of relations describing one connected region, e.g. "(x>=-1) and (x<=1)".
+// Returns {kind:'all'} or {kind:'interval', lower, upper, excluded}, or null if some clause
+// isn't a relation this parser recognizes.
+function formatDomainPiece(piece, varName) {
+  const stripped = stripOuterParens(piece.trim());
+  if (stripped === varName) return { kind: 'all' };
+
+  let lower = null;
+  let upper = null;
+  const excluded = [];
+  for (const clause of splitTopLevelKeyword(stripped, 'and')) {
+    const parsed = parseDomainClause(clause, varName);
+    if (!parsed) return null;
+    const { op, value } = parsed;
+    if (op === '<>') excluded.push(value);
+    else if (op === '>' || op === '>=') lower = { value, inclusive: op === '>=' };
+    else if (op === '<' || op === '<=') upper = { value, inclusive: op === '<=' };
+  }
+  // Giac sometimes lists a boundary both as included and excluded at once (e.g.
+  // "x<=-1 and x<>-1", from domain(1/sqrt(x^2-1),x)) - that's just the strict bound "x<-1",
+  // so fold the exclusion into the bound's inclusivity instead of showing a redundant
+  // "\ {-1}" right next to a bracket that already excludes it.
+  const remaining = excluded.filter((v) => {
+    if (lower && lower.value === v) {
+      lower = { ...lower, inclusive: false };
+      return false;
+    }
+    if (upper && upper.value === v) {
+      upper = { ...upper, inclusive: false };
+      return false;
+    }
+    return true;
+  });
+  return { kind: 'interval', lower, upper, excluded: remaining };
+}
+
+// Builds the {latex, text} pair for one connected piece of a domain (see formatDomainPiece) -
+// an interval (possibly unbounded on either side) with zero or more interior points removed.
+// Returns null if any bound/excluded value fails to latex().
+function domainPieceToStrings(piece) {
+  const { lower, upper, excluded } = piece;
+  const lowerLatex = lower ? giacToLatex(lower.value) : null;
+  const upperLatex = upper ? giacToLatex(upper.value) : null;
+  if ((lower && lowerLatex == null) || (upper && upperLatex == null)) return null;
+
+  const openL = lower ? (lower.inclusive ? '[' : '(') : '(';
+  const openR = upper ? (upper.inclusive ? ']' : ')') : ')';
+  let latex = lower || upper
+    ? `${openL}${lower ? lowerLatex : '-\\infty'},\\,${upper ? upperLatex : '\\infty'}${openR}`
+    : '\\mathbb{R}';
+  let text = lower || upper ? `${openL}${lower ? lower.value : '-∞'}, ${upper ? upper.value : '∞'}${openR}` : 'ℝ';
+
+  if (excluded.length > 0) {
+    const excludedLatex = excluded.map((v) => giacToLatex(v));
+    if (excludedLatex.some((l) => l == null)) return null;
+    latex += ` \\setminus \\{${excludedLatex.join(',\\,')}\\}`;
+    text += ` ∖ {${excluded.join(', ')}}`;
+  }
+  return { latex, text };
+}
+
+// Formats Giac's raw domain(expr,var) answer as "D = ..." / "\mathbb{D} = ..." set notation -
+// a single interval, a union of them ("A ∪ B"), Real numbers minus finitely many points
+// ("ℝ \ {...}"), or plain ℝ when there's no restriction at all - or null if `raw` isn't
+// shaped like anything this parser recognizes (caller falls back to showing it as-is).
+function formatDomainResult(raw, varName) {
+  const trimmed = raw.trim();
+  const listInner = stripFullWrap(trimmed, '[', ']');
+  const body = listInner != null ? listInner : trimmed;
+  let pieces = splitTopLevel(body, ',').map((p) => p.trim());
+  if (pieces.length === 1) {
+    const orSplit = splitTopLevelKeyword(body, 'or').map((p) => p.trim());
+    if (orSplit.length > 1) pieces = orSplit;
+  }
+
+  const formatted = [];
+  for (const piece of pieces) {
+    const parsedPiece = formatDomainPiece(piece, varName);
+    if (!parsedPiece) return null;
+    if (parsedPiece.kind === 'all') return { latex: '\\mathbb{D} = \\mathbb{R}', text: 'D = ℝ' };
+    const strs = domainPieceToStrings(parsedPiece);
+    if (!strs) return null;
+    formatted.push(strs);
+  }
+  return {
+    latex: `\\mathbb{D} = ${formatted.map((p) => p.latex).join(' \\cup ')}`,
+    text: `D = ${formatted.map((p) => p.text).join(' ∪ ')}`,
+  };
+}
+
+// Giac's own domain() answer is a boolean relation (e.g. "x<>0") - and the generic eval
+// path's autosimplify pass (see applyAutosimplify) runs every result through
+// simplify()/regroup() before display, which collapses a bare relation like that straight to
+// "true" (confirmed against the actual engine: simplify(x<>0) => true), destroying the very
+// answer domain() was asked for. So this is short-circuited ahead of the generic path below,
+// the same way the _cdf() calls above are, skipping autosimplify entirely and rendering the
+// raw relation as "D = ..." set notation (see formatDomainResult) instead.
+async function evaluateDomain(domainCall, sentExpr) {
+  if (!domainCall) return null;
+  const out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
+  if (out.startsWith('GIAC_ERROR')) {
+    return { raw: out, isError: true, text: out.slice(11).trim(), latex: null, isGraphics: false };
+  }
+  const formatted = formatDomainResult(out, domainCall.varName);
+  if (formatted) {
+    return { raw: out, isError: false, text: formatted.text, latex: formatted.latex, isGraphics: false };
+  }
+  // Some shape formatDomainResult doesn't recognize yet (e.g. a multivariable expression) -
+  // still skip autosimplify (see above) and show Giac's own relation as-is rather than "true".
+  return { raw: out, isError: false, text: out, latex: null, isGraphics: false };
+}
+
 // Evaluate one line of Xcas input. Returns a promise for:
 //   { raw, isError, text, latex, isGraphics }
 // - raw: the string Giac returned, untouched - except a single-solution solve() result,
@@ -2456,6 +2621,11 @@ export async function evaluate(expr, definitions) {
   // never handled twice.
   const otherCdfResult = await evaluateOtherDistributionCdf(sentExpr);
   if (otherCdfResult) return otherCdfResult;
+
+  // domain()'s own boolean answer must never reach the generic autosimplify pass below (see
+  // evaluateDomain's own comment for why), so it's short-circuited here too.
+  const domainResult = await evaluateDomain(parseDomainCall(sentExpr), sentExpr);
+  if (domainResult) return domainResult;
 
   let out = stripTrailingSemicolon(await rawEvalAsync(sentExpr));
 
@@ -2801,6 +2971,12 @@ export async function evaluateApprox(expr, definitions) {
   // Same idea, generalized to every other distribution's _cdf() - see evaluateOtherDistributionCdf.
   const otherCdfResult = await evaluateOtherDistributionCdf(normalized);
   if (otherCdfResult) return otherCdfResult;
+
+  // Same short-circuit as evaluate() above - domain()'s boolean relation gets corrupted to
+  // "true" just as badly by this function's own evalf() step further below (confirmed
+  // against the engine: evalf(x<>0) => true too), so it never gets a chance to reach it.
+  const domainResult = await evaluateDomain(parseDomainCall(normalized), normalized);
+  if (domainResult) return domainResult;
 
   // Force exact evaluation regardless of the engine's ambient approx_mode setting (see
   // app.js's settings toggle) - otherwise a global approx mode would have already thrown
