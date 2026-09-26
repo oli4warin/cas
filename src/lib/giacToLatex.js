@@ -301,6 +301,46 @@ function renderMatrix(node) {
   return `\\left(\\begin{array}{${'c'.repeat(cols)}}\n${body}\n\\end{array}\\right)`;
 }
 
+// Whether `node` denotes a vector, in the everyday-math sense used by this app's own
+// cross()/dot() support (see renderCall below): either a flat bracket list of plain items
+// (e.g. "[1,2,3]"), or a matrix with one of its two dimensions equal to 1 - a row
+// ("[[1,2,3]]") or column ("[1;2;3]", which parseArgList above already turns into one
+// single-item row per element, matching normalizeNspireMatrices in lib/giac.js) vector. A
+// jagged bracket-of-brackets (mismatched row widths) is neither a valid matrix nor a vector
+// here, so it falls through to false.
+function isVectorNode(node) {
+  if (!node || node.type !== 'bracket' || node.items.length === 0) return false;
+  if (isMatrixNode(node)) return node.items.length === 1 || node.items[0].items.length === 1;
+  return node.items.every((item) => item && item.type !== 'bracket' && item.type !== 'brace');
+}
+
+// Whether a definition's raw right-hand side (see applyEntryToDefinitions/lib/definitions.js)
+// is a vector literal - used there to decide whether the saved name should render with an
+// overhead arrow (see renderVarName below) everywhere it's typed afterwards. Syntax-only, same
+// as the rest of this module: no engine round trip, so it only recognizes vectors written
+// directly as bracket literals, not e.g. a name that merely evaluates to one ("b:=a" right
+// after "a:=[1,2,3]").
+export function isVectorLiteral(src) {
+  if (!src || !src.trim()) return false;
+  try {
+    const tokens = tokenize(expandInverseTrigAliases(src));
+    const parser = makeParser(tokens);
+    const node = parser.parseExpression(0);
+    if (parser.peekComma()) return false;
+    return isVectorNode(node);
+  } catch {
+    return false;
+  }
+}
+
+// Set of names known to hold a vector (see isVectorLiteral and vectorNames/lib/definitions.js)
+// for the *current* giacToLatex()/linesToGatheredLatex() call - read by renderVarName below to
+// draw that name with an overhead arrow. Module-scoped rather than threaded as a parameter
+// through every render*/parse* function since this converter is synchronous, top-to-bottom, and
+// never re-entrant (see the file-level comment); set at the top of giacToLatex() and cleared
+// once it returns.
+let currentVectorNames = null;
+
 // MathJax's "_" only pulls in a single following token as the subscript, so an unbraced
 // multi-character subscript like "x_10" renders as x with subscript "1" followed by a
 // literal "0" instead of "x₁₀" (e.g. solve()'s per-solution suffix, see parseSolveSolutions
@@ -309,10 +349,15 @@ function renderMatrix(node) {
 // rather than starting a nested subscript.
 function renderVarName(name) {
   const idx = name.indexOf('_');
-  if (idx === -1) return name;
-  const base = name.slice(0, idx);
-  const sub = name.slice(idx + 1).replace(/_/g, '\\_');
-  return `${base}_{${sub}}`;
+  let rendered;
+  if (idx === -1) {
+    rendered = name;
+  } else {
+    const base = name.slice(0, idx);
+    const sub = name.slice(idx + 1).replace(/_/g, '\\_');
+    rendered = `${base}_{${sub}}`;
+  }
+  return currentVectorNames?.has(name) ? `\\vec{${rendered}}` : rendered;
 }
 
 // "_" has catcode "subscript" throughout MathJax's TeX input (that's fixed at tokenization,
@@ -505,9 +550,12 @@ function renderCall(node) {
 }
 
 // Converts a (possibly incomplete) giac expression string into LaTeX for live preview.
-// Returns '' for blank input and null if something unexpected went wrong.
-export function giacToLatex(src) {
+// Returns '' for blank input and null if something unexpected went wrong. `vectorNames`
+// (optional, see vectorNames/lib/definitions.js) names identifiers to draw with an overhead
+// arrow wherever they appear as a bare variable (see currentVectorNames/renderVarName above).
+export function giacToLatex(src, vectorNames) {
   if (!src || !src.trim()) return '';
+  currentVectorNames = vectorNames || null;
   try {
     // "sin-1(x)"/"sin^-1(x)"/"sin^(-1)(x)" -> "asin(x)" etc, same rewrite giac.js applies
     // before evaluation (see normalizeInverseTrigAliases there) - done here too, ahead of
@@ -525,6 +573,8 @@ export function giacToLatex(src) {
     return parts.map(render).join(',\\ ');
   } catch {
     return null;
+  } finally {
+    currentVectorNames = null;
   }
 }
 
@@ -533,9 +583,10 @@ export function giacToLatex(src) {
 // string: a single line just gets giacToLatex's own single-expression rendering, but two or
 // more are stacked in a `gathered` block rather than joined into running text, so each keeps
 // its own line the way it was typed. Falls back to '' (not a partial render) if any single
-// line fails to convert, same as giacToLatex itself does for its blank/error case.
-export function linesToGatheredLatex(lines) {
-  if (lines.length === 1) return giacToLatex(lines[0]) || '';
-  const rendered = lines.map((line) => giacToLatex(line));
+// line fails to convert, same as giacToLatex itself does for its blank/error case. `vectorNames`
+// is forwarded to every line's own giacToLatex() call unchanged.
+export function linesToGatheredLatex(lines, vectorNames) {
+  if (lines.length === 1) return giacToLatex(lines[0], vectorNames) || '';
+  const rendered = lines.map((line) => giacToLatex(line, vectorNames));
   return rendered.every(Boolean) ? `\\begin{gathered}${rendered.join('\\\\')}\\end{gathered}` : '';
 }

@@ -5,6 +5,7 @@ import { reinsertableValue } from '../lib/giac.js';
 import { plottableInputForEntry, plottableOutputForEntry } from '../lib/plottable.js';
 import { saveableForEntry } from '../lib/saveable.js';
 import { displayListIndexAliases } from '../lib/listIndexAlias.js';
+import { vectorNames } from '../lib/definitions.js';
 
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
 // `onPlot` is called with (index, spec) - spec being whatever plottableInputForEntry/
@@ -171,7 +172,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   // rather than joining lines into running text - if any single line fails to convert, the
   // whole thing falls back to plain text together, same as a single line already does.
   const inputLines = entry.input.split('\n').map((line) => displayListIndexAliases(line, definitions));
-  const inputLatex = linesToGatheredLatex(inputLines);
+  const inputLatex = linesToGatheredLatex(inputLines, vectorNames(definitions));
   if (inputLatex) {
     inputMath.textContent = '\\[' + inputLatex + '\\]';
     inputMath.style.display = '';

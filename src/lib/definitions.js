@@ -4,6 +4,8 @@
 // we don't query the engine for it because Giac has no simple "list user identifiers" call,
 // so we infer it from the same input lines the user already submitted successfully.
 
+import { isVectorLiteral } from './giacToLatex.js';
+
 const IDENT = '[A-Za-z_][A-Za-z0-9_]*';
 const FUNC_DEF_RE = new RegExp(`^(${IDENT})\\s*\\(\\s*(${IDENT}(?:\\s*,\\s*${IDENT})*)\\s*\\)\\s*:=\\s*(.+)$`);
 const VAR_DEF_RE = new RegExp(`^(${IDENT})\\s*:=\\s*(.+)$`);
@@ -45,7 +47,8 @@ export function parseDefinition(expr) {
   }
   m = s.match(VAR_DEF_RE);
   if (m) {
-    return { kind: 'variable', name: m[1], body: m[2].trim() };
+    const body = m[2].trim();
+    return { kind: 'variable', name: m[1], body, isVector: isVectorLiteral(body) };
   }
   return null;
 }
@@ -64,7 +67,10 @@ export function parseMultiDefinition(expr) {
   let rhs = m[2].trim();
   if (rhs.startsWith('[') && rhs.endsWith(']')) rhs = rhs.slice(1, -1);
   const values = splitTopLevelCommas(rhs).map((v) => v.trim());
-  return names.map((name, i) => ({ kind: 'variable', name, body: values.length === names.length ? values[i] : rhs }));
+  return names.map((name, i) => {
+    const body = values.length === names.length ? values[i] : rhs;
+    return { kind: 'variable', name, body, isVector: isVectorLiteral(body) };
+  });
 }
 
 function parsePurge(expr) {
@@ -107,4 +113,17 @@ export function applyEntryToDefinitions(definitions, expr, result) {
 
 export function definitionLabel(def) {
   return def.kind === 'function' ? `${def.name}(${def.params.join(',')})` : def.name;
+}
+
+// Names of every currently-defined variable whose saved value is a vector literal (see
+// isVectorLiteral/lib/giacToLatex.js) - passed to giacToLatex()/linesToGatheredLatex() so a
+// bare reference to one of these names renders with an overhead arrow, everywhere it's typed
+// afterwards, matching how the name was originally saved (e.g. "a:=[1,2,3]" -> every later "a"
+// renders as "\vec{a}").
+export function vectorNames(definitions) {
+  const names = new Set();
+  for (const def of definitions.values()) {
+    if (def.kind === 'variable' && def.isVector) names.add(def.name);
+  }
+  return names;
 }
