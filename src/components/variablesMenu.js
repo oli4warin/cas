@@ -1,5 +1,5 @@
 import { h, clear } from '../lib/dom.js';
-import { definitionLabel } from '../lib/definitions.js';
+import { definitionLabel, vectorNames } from '../lib/definitions.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
 import { typesetNode } from '../lib/mathjax.js';
 
@@ -32,18 +32,27 @@ export function VariablesMenu({ onPurge }) {
   function render() {
     clear(list);
     const entries = Array.from(definitions.values());
+    const names = vectorNames(definitions);
     emptyHint.style.display = entries.length ? 'none' : '';
     list.style.display = entries.length ? '' : 'none';
     for (const def of entries) {
       const valueEl = h('span', { class: 'variables-menu__value' });
-      const latex = giacToLatex(def.body);
+      const latex = giacToLatex(def.body, names);
       if (latex) valueEl.textContent = '\\(' + latex + '\\)';
       else valueEl.textContent = def.body;
+      // A saved vector's own name gets the same overhead-arrow treatment its value's "a" would
+      // get if it appeared inside another expression (see currentVectorNames/giacToLatex.js) -
+      // rendered through giacToLatex too so it picks up the same underscore/subscript handling,
+      // rather than duplicating that logic here.
+      const nameEl = h('span', { class: 'variables-menu__name' });
+      const nameLatex = def.kind === 'variable' && def.isVector ? giacToLatex(def.name, names) : null;
+      if (nameLatex) nameEl.textContent = '\\(' + nameLatex + '\\)';
+      else nameEl.textContent = definitionLabel(def);
       list.appendChild(
         h(
           'div',
           { class: 'variables-menu__row' },
-          h('span', { class: 'variables-menu__name' }, definitionLabel(def)),
+          nameEl,
           valueEl,
           h(
             'button',

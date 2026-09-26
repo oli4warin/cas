@@ -17,7 +17,7 @@ import {
 } from './lib/giac.js';
 import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
-import { applyEntryToDefinitions, parseDefinition, parseMultiDefinition, definitionLabel } from './lib/definitions.js';
+import { applyEntryToDefinitions, parseDefinition, parseMultiDefinition, definitionLabel, vectorNames } from './lib/definitions.js';
 import { plottableInputForEntry, plottableOutputForEntry } from './lib/plottable.js';
 import { saveableForEntry } from './lib/saveable.js';
 import { displayListIndexAliases } from './lib/listIndexAlias.js';
@@ -886,7 +886,7 @@ export function mountApp(root) {
 
   function updatePreview() {
     autosizeInput();
-    const latex = giacToLatex(displayListIndexAliases(joinInputLines(input.value), state.definitions)) || '';
+    const latex = giacToLatex(displayListIndexAliases(joinInputLines(input.value), state.definitions), vectorNames(state.definitions)) || '';
     clearTimeout(previewDebounce);
     previewDebounce = setTimeout(() => {
       if (latex) {
