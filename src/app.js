@@ -1377,13 +1377,19 @@ export function mountApp(root) {
     // of the two actually finds something (see there and the entry's own always-visible "plot"/
     // "3d" buttons in historyEntry.js, which show under these same checks) - otherwise "p" types
     // normally, same as any other key while browsing (see onInputChanged, which drops the
-    // selection the moment typing resumes).
+    // selection the moment typing resumes). Drops the browsing selection itself (same
+    // state.navPos = -1/updateSelection() as Escape above) before handing off to the plot
+    // panel, so the entry that was just sent there doesn't stay highlighted behind it -
+    // addExpressionToPlot/addExpressionToPlot3d already return focus to this input on their
+    // own, this just also exits selection mode to match.
     if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
       const entry = state.history[step.idx];
       const plotSpec =
         step.part === 'input' ? plottableInputForEntry(entry, state.definitions) : plottableOutputForEntry(entry);
       if (plotSpec) {
         e.preventDefault();
+        state.navPos = -1;
+        updateSelection();
         addExpressionToPlot(plotSpec);
         return;
       }
@@ -1391,6 +1397,8 @@ export function mountApp(root) {
         step.part === 'input' ? plottable3dInputForEntry(entry, state.definitions) : plottable3dOutputForEntry(entry);
       if (plot3dSpec) {
         e.preventDefault();
+        state.navPos = -1;
+        updateSelection();
         addExpressionToPlot3d(plot3dSpec);
         return;
       }
