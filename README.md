@@ -16,6 +16,9 @@ this app links to the unmodified official build unchanged.
 Math rendering is done by [MathJax](https://www.mathjax.org/) and its contributors,
 licensed under the [Apache License 2.0](https://github.com/mathjax/MathJax/blob/master/LICENSE).
 
+3D plots are rendered by [Plotly.js](https://plotly.com/javascript/) and its contributors,
+licensed under the [MIT License](https://github.com/plotly/plotly.js/blob/master/LICENSE).
+
 ## Running it
 
 Because it uses ES modules (`<script type="module">`) and a Web Worker, it must be served
