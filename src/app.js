@@ -233,10 +233,12 @@ const TOOLBAR_GROUPS = [
     key: 'nav',
     col: 'right',
     // Arrow-key cluster plus backspace and new-line for touchscreens, where those physical
-    // keys aren't reachable - moves the cursor, deletes, or inserts a newline (see
-    // moveCursor/backspaceAtCursor/insertNewline) instead of inserting a math snippet. Sits
-    // below the keypad, same 4-column grid: arrows fill one row, then backspace and new-line
-    // share the row below, half the width each.
+    // keys aren't reachable - mirrors what each physical key does: ←/→ move the cursor (see
+    // moveCursor), ↑/↓ browse history same as the physical keys (see
+    // browseHistoryUp/browseHistoryDown), ⌫/⏎ delete or insert a newline (see
+    // backspaceAtCursor/insertNewline) - instead of inserting a math snippet. Sits below the
+    // keypad, same 4-column grid: arrows fill one row, then backspace and new-line share the
+    // row below, half the width each.
     items: [
       { label: '←', nav: 'left' },
       { label: '↑', nav: 'up' },
@@ -305,10 +307,13 @@ export function mountApp(root) {
 
   const sessionId = makeSessionId();
   // Snapshot of the rows/view being handed off to a popped-out window, taken at the
-  // instant popOutPlot() fires - see the comment there for why this can't just read the
-  // live plotRows/plotView (those get reset to blank in that same click handler, and the
-  // popup's state request only arrives after that reset has already landed).
+  // instant popOutPlot()/popOutPlot3d() fires - see the comment there for why this can't
+  // just read the live plotRows/plotView (those get reset to blank in that same click
+  // handler, and the popup's state request only arrives after that reset has already
+  // landed). Two separate snapshots since the 2D and 3D panels can each be popped out
+  // independently of the other.
   let plotHandoff = null;
+  let plot3dHandoff = null;
   let bridgeHost = null;
   let plotPanelInstance = null;
   let plot3dPanelInstance = null;
@@ -441,6 +446,13 @@ export function mountApp(root) {
             onclick: () => {
               if (t.nav === 'backspace') backspaceAtCursor();
               else if (t.nav === 'newline') insertNewline();
+              // up/down mirror the physical ArrowUp/ArrowDown keys (browse history - see
+              // browseHistoryUp/browseHistoryDown) rather than moving the caret, same as
+              // handleKeyDown's own plain-ArrowUp/ArrowDown branches; only left/right still
+              // move the caret via moveCursor, since those have no history-browsing job to
+              // do instead.
+              else if (t.nav === 'up') browseHistoryUp();
+              else if (t.nav === 'down') browseHistoryDown();
               else if (t.nav) moveCursor(t.nav);
               else if (t.wrap === false) insertPlain(t.prefix);
               else insertSnippet(t.prefix, t.suffix);
@@ -674,6 +686,28 @@ export function mountApp(root) {
     input.scrollIntoView({ block: 'nearest' });
   }
 
+  // The actual "move browsing selection up/down one step" logic behind the physical
+  // ArrowUp/ArrowDown keys (see handleKeyDown) and the math keyboard's ↑/↓ nav buttons on
+  // touchscreens (see TOOLBAR_GROUPS/renderToolbarGroup) - kept as one shared pair of
+  // functions so both agree on exactly the same browsing behavior. Returns whether it
+  // actually moved anything (false at either end of history, or with nothing to browse at
+  // all), so callers can tell a real move from a no-op - handleKeyDown only preventDefaults
+  // the key on an actual move, letting it fall through to its normal job (typing/scrolling)
+  // otherwise.
+  function browseHistoryUp() {
+    const s = steps();
+    if (s.length === 0) return false;
+    state.navPos = state.navPos < 0 ? 0 : Math.min(s.length - 1, state.navPos + 1);
+    updateSelection();
+    return true;
+  }
+  function browseHistoryDown() {
+    if (state.navPos < 0) return false;
+    state.navPos = state.navPos <= 0 ? -1 : state.navPos - 1;
+    updateSelection();
+    return true;
+  }
+
   function scrollHistoryToBottom() {
     historyList.scrollTop = historyList.scrollHeight;
     // MathJax typesets the newest entry's math asynchronously (see lib/mathjax), so its
@@ -811,47 +845,22 @@ export function mountApp(root) {
     openMenuForBareCommand(input.value);
   }
 
-  // Moves the textarea's cursor the way the physical arrow keys would - used by the nav
-  // group on the math keyboard (see TOOLBAR_GROUPS) for touchscreens where those keys
-  // aren't reachable. Synthetic key events don't trigger a textarea's native cursor
-  // movement, so this reimplements it: left/right collapse a selection to its near edge or
-  // else step by one character, up/down keep the column offset and clamp to the target
-  // line's length, the same way native caret movement does.
+  // Moves the textarea's cursor left/right the way the physical arrow keys would - used by
+  // the nav group's ←/→ buttons on the math keyboard (see TOOLBAR_GROUPS) for touchscreens
+  // where those keys aren't reachable. Synthetic key events don't trigger a textarea's
+  // native cursor movement, so this reimplements it: collapses a selection to its near edge,
+  // or else steps by one character. (Up/down are handled separately, by
+  // browseHistoryUp/browseHistoryDown - see renderToolbarGroup - since on this app's
+  // single-line-until-Shift+Enter input, up/down's real job is browsing history, not moving
+  // the caret; see handleKeyDown's own plain-ArrowUp/ArrowDown branches for the physical-key
+  // equivalent.)
   function moveCursor(dir) {
     input.focus();
     const value = input.value;
     const start = input.selectionStart ?? value.length;
     const end = input.selectionEnd ?? value.length;
-    let pos;
-    if (dir === 'left') {
-      pos = start !== end ? start : Math.max(0, start - 1);
-    } else if (dir === 'right') {
-      pos = start !== end ? end : Math.min(value.length, end + 1);
-    } else {
-      const lines = value.split('\n');
-      let lineIdx = 0;
-      let col = 0;
-      let offset = 0;
-      for (let i = 0; i < lines.length; i++) {
-        const lineLen = lines[i].length;
-        if (i === lines.length - 1 || start <= offset + lineLen) {
-          lineIdx = i;
-          col = start - offset;
-          break;
-        }
-        offset += lineLen + 1;
-      }
-      const targetIdx = dir === 'up' ? lineIdx - 1 : lineIdx + 1;
-      if (targetIdx < 0) {
-        pos = 0;
-      } else if (targetIdx >= lines.length) {
-        pos = value.length;
-      } else {
-        let targetOffset = 0;
-        for (let i = 0; i < targetIdx; i++) targetOffset += lines[i].length + 1;
-        pos = targetOffset + Math.min(col, lines[targetIdx].length);
-      }
-    }
+    const pos =
+      dir === 'left' ? (start !== end ? start : Math.max(0, start - 1)) : start !== end ? end : Math.min(value.length, end + 1);
     input.setSelectionRange(pos, pos);
   }
 
@@ -1336,19 +1345,14 @@ export function mountApp(root) {
     // Up/Down only move which output/input is selected - they never touch the input's
     // text. Confirm with Enter or Tab to actually insert it.
     if (e.key === 'ArrowUp') {
-      const s = steps();
-      if (s.length === 0) return;
+      if (!browseHistoryUp()) return;
       e.preventDefault();
-      state.navPos = state.navPos < 0 ? 0 : Math.min(s.length - 1, state.navPos + 1);
-      updateSelection();
       return;
     }
 
     if (e.key === 'ArrowDown') {
-      if (state.navPos < 0) return;
+      if (!browseHistoryDown()) return;
       e.preventDefault();
-      state.navPos = state.navPos <= 0 ? -1 : state.navPos - 1;
-      updateSelection();
       return;
     }
 
@@ -1369,19 +1373,17 @@ export function mountApp(root) {
     // "p" into the input, using whichever of plottableInputForEntry/plottableOutputForEntry
     // matches that half so e.g. a selected "y'=x-y" input plots the differential equation
     // itself while its selected output plots the solution curve instead (see lib/plottable.js).
-    // The 2D check runs first and wins whenever it finds something - a system that never
-    // mentions z is always shaped for the 2D panel, not the 3D one (see lib/plottable3d.js's own
-    // module comment for why that ordering means the two checks never actually compete) - and
-    // only when it finds nothing does the 3D check (lib/plottable3d.js) get a turn, sending a
-    // 2-variable surface or an x/y/z system to the 3D panel instead. Only intercepted when one
-    // of the two actually finds something (see there and the entry's own always-visible "plot"/
-    // "3d" buttons in historyEntry.js, which show under these same checks) - otherwise "p" types
-    // normally, same as any other key while browsing (see onInputChanged, which drops the
+    // 2D only - "3" just below is its exact 3D sibling (lib/plottable3d.js), so a selected half
+    // that's 3D-plottable (a 2-variable surface, or a system mentioning z) needs "3" instead;
+    // "p" no longer falls back to 3D itself, so the two keys always agree with the entry's own
+    // "plot"/"3d" buttons in historyEntry.js (which show under these same checks) about which
+    // key does what. Only intercepted when the check actually finds something - otherwise "p"
+    // types normally, same as any other key while browsing (see onInputChanged, which drops the
     // selection the moment typing resumes). Drops the browsing selection itself (same
     // state.navPos = -1/updateSelection() as Escape above) before handing off to the plot
     // panel, so the entry that was just sent there doesn't stay highlighted behind it -
-    // addExpressionToPlot/addExpressionToPlot3d already return focus to this input on their
-    // own, this just also exits selection mode to match.
+    // addExpressionToPlot already returns focus to this input on its own, this just also exits
+    // selection mode to match.
     if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
       const entry = state.history[step.idx];
       const plotSpec =
@@ -1393,6 +1395,16 @@ export function mountApp(root) {
         addExpressionToPlot(plotSpec);
         return;
       }
+    }
+
+    // "3" is "p"'s exact 3D sibling - same idea, same shared selection (see currentStep/
+    // setSelected), but sending whichever of plottable3dInputForEntry/plottable3dOutputForEntry
+    // matches to the 3D plot panel instead (see lib/plottable3d.js). Kept as its own key rather
+    // than a fallback inside "p" above so a half that's plottable *both* ways (there currently
+    // isn't one - see lib/plottable3d.js's own module comment - but this keeps "p"/"3" meaning
+    // exactly "2D"/"3D" regardless) always lets you ask for either explicitly.
+    if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
+      const entry = state.history[step.idx];
       const plot3dSpec =
         step.part === 'input' ? plottable3dInputForEntry(entry, state.definitions) : plottable3dOutputForEntry(entry);
       if (plot3dSpec) {
@@ -1697,8 +1709,8 @@ export function mountApp(root) {
 
   // Sends a history entry's plottable-in-3D input or output (see lib/plottable3d.js) to the 3D
   // plot panel - the 3D sibling of addExpressionToPlot above, wired the same way to the entry's
-  // "3d" buttons (historyEntry.js) and the "p" keyboard shortcut's own 3D fallback
-  // (handleKeyDown above). Kept as its own separate function/state (plot3dRows/plot3dOpen, its
+  // "3d" buttons (historyEntry.js) and the "3" keyboard shortcut (handleKeyDown above). Kept
+  // as its own separate function/state (plot3dRows/plot3dOpen, its
   // own panel instance) rather than a mode of the 2D plot - the 3D panel is a wholly different
   // kind of view (Plotly-rendered surfaces/isosurfaces, no shared canvas/curve model with the 2D
   // panel's own rows - see components/plot3dPanel.js).
@@ -1732,7 +1744,13 @@ export function mountApp(root) {
     } else {
       openPlot3d();
       renderLayout();
-      setTimeout(() => input.focus(), 0);
+      // Not a fixed setTimeout(0) like addExpressionToPlot's own equivalent above - the 3D
+      // panel's own initial focus (see plot3dPanel.js's focusOnMount) only fires once its
+      // Plotly library has finished loading, a genuine network fetch (~4.5MB) the very first
+      // time any session opens this panel, easily well past any fixed delay; chaining on its
+      // own `ready` promise instead means this always lands last no matter how long that
+      // took, cached-and-instant or not.
+      plot3dPanelInstance?.ready.then(() => input.focus());
     }
   }
 
@@ -1797,6 +1815,7 @@ export function mountApp(root) {
         state.plot3dView = typeof next === 'function' ? next(state.plot3dView) : next;
         plot3dPanelInstance?.setView(state.plot3dView);
       },
+      onPopOut: popOutPlot3d,
       onClose: closePlot3d,
     });
     plot3dPanelInstance.setDefinitions(state.definitions);
@@ -1867,6 +1886,22 @@ export function mountApp(root) {
     renderLayout();
   }
 
+  // The exact 3D sibling of popOutPlot above - see there - popped into its own window
+  // (?popout=plot3d, see plot3dStandalone.js) rather than reusing ?popout=plot's, since the
+  // popup needs Plot3DPanel/DEFAULT_VIEW_3D/makeRow3d instead of PlotPanel's own 2D versions
+  // (see lib/plotBridge.js's `kind` for how the bridge itself tells the two apart).
+  function popOutPlot3d() {
+    plot3dHandoff = { rows: state.plot3dRows, view: state.plot3dView };
+    const url = `${window.location.origin}${window.location.pathname}?popout=plot3d&session=${sessionId}&mode=move`;
+    window.open(url, `onlinecas-plot3d-${sessionId}-${Math.random().toString(36).slice(2)}`, 'width=1000,height=700');
+    state.plot3dOpen = false;
+    if (state.mobileView === 'plot3d') state.mobileView = fallbackMobileView();
+    unmountPlot3dPanel();
+    state.plot3dRows = [makeRow3d()];
+    state.plot3dView = DEFAULT_VIEW_3D;
+    renderLayout();
+  }
+
   // ---------- boot ----------
 
   renderLayout();
@@ -1886,14 +1921,15 @@ export function mountApp(root) {
       giacSetAutosimplifyLevel(state.autosimplify);
       input.focus();
 
-      // Answers eval requests from any window this session pops the plot panel out into
-      // (see plotStandalone.js) so it can reuse this same Giac session's variables and
-      // functions.
+      // Answers eval requests from any window this session pops the 2D or 3D plot panel out
+      // into (see plotStandalone.js/plot3dStandalone.js) so it can reuse this same Giac
+      // session's variables and functions.
       bridgeHost = startBridgeHost({
         sessionId,
         evaluateRaw: giacEvaluateRaw,
         getDefinitions: () => state.definitions,
         getPlotState: () => plotHandoff ?? { rows: state.plotRows, view: state.plotView },
+        getPlot3dState: () => plot3dHandoff ?? { rows: state.plot3dRows, view: state.plot3dView },
       });
     },
     (err) => {

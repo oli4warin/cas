@@ -117,16 +117,16 @@ export function plottableInputForEntry(entry, definitions = new Map()) {
 // entry's *output* regardless of what shape its input was, so e.g. "y'=x-y"'s solution
 // (desolve() strips its "y=" label before this ever sees it - see reinsertableValue/
 // formatDesolveResult in giac.js) is offered as the plain function it is, not the equation
-// that produced it. Excludes anything also free in "y" (e.g. "sin(x*y)") - those are surfaces,
-// not curves, and belong to lib/plottable3d.js's plottable3dOutputForEntry instead; an actual
-// equation in x and y (e.g. "y=x") already fails isPlottableInX itself (hasTopLevelRelation)
-// and is handled, from the *input* side, by plottableInputForEntry's system check above.
-// Returns `{mode, patch}`, or null if this entry's output isn't offerable at all (an error, an
-// equation, a surface, or a result that doesn't actually mention x).
+// that produced it. Doesn't exclude anything also free in "y" (e.g. "sin(x*y)") even though
+// lib/plottable3d.js's plottable3dOutputForEntry also offers that same result as a surface -
+// both options are meant to be available at once here (the "p"/"3" keys and the entry's own
+// "plot"/"3d" buttons each pick whichever one they mean), not one taking priority over the
+// other. An actual equation in x and y (e.g. "y=x") still fails isPlottableInX itself
+// (hasTopLevelRelation) and is handled, from the *input* side, by plottableInputForEntry's
+// system check above. Returns `{mode, patch}`, or null if this entry's output isn't offerable
+// at all (an error, an equation, or a result that doesn't actually mention x).
 export function plottableOutputForEntry(entry) {
   if (!entry || entry.isError) return null;
   const raw = reinsertableValue(entry.raw ?? '');
-  if (!isPlottableInX(raw)) return null;
-  if (isPlottableInX(raw, 'y')) return null;
-  return { mode: 'function', patch: { expr: raw } };
+  return isPlottableInX(raw) ? { mode: 'function', patch: { expr: raw } } : null;
 }

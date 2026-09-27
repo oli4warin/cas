@@ -13,10 +13,14 @@ const EVAL_TIMEOUT_MS = 8000;
 
 // Runs in the window that owns the live Giac engine. Answers eval requests from any
 // popped-out plot window for this session, pushes definitions whenever they change, and
-// (when getPlotState is given) hands over this window's current plot rows/view once to a
-// new window that asks for them - used to "move" an embedded plot panel into a popup
-// instead of that popup starting from a blank session.
-export function startBridgeHost({ sessionId, evaluateRaw, getDefinitions, getPlotState }) {
+// (when getPlotState/getPlot3dState is given) hands over this window's current plot
+// rows/view once to a new window that asks for them - used to "move" an embedded 2D or 3D
+// plot panel into a popup instead of that popup starting from a blank session. Which of the
+// two a request wants is carried in the message's own `kind` ('plot' or 'plot3d', see
+// connectBridgeClient's requestPlotState below) rather than needing two separate message
+// types, since every other part of the exchange (the response envelope, the id round-trip)
+// is identical either way.
+export function startBridgeHost({ sessionId, evaluateRaw, getDefinitions, getPlotState, getPlot3dState }) {
   const channel = new BroadcastChannel(CHANNEL_NAME);
 
   const broadcastDefinitions = () => {
@@ -42,11 +46,12 @@ export function startBridgeHost({ sessionId, evaluateRaw, getDefinitions, getPlo
     } else if (msg.type === 'hello') {
       broadcastDefinitions();
     } else if (msg.type === 'request-plot-state') {
+      const getState = msg.kind === 'plot3d' ? getPlot3dState : getPlotState;
       channel.postMessage({
         type: 'plot-state',
         sessionId,
         id: msg.id,
-        state: getPlotState ? getPlotState() : null,
+        state: getState ? getState() : null,
       });
     }
   };
@@ -113,8 +118,10 @@ export function connectBridgeClient({ sessionId, onDefinitions, onConnectionChan
   }
 
   // One-shot: asks the host for its current plot rows/view (used only when this window was
-  // opened to take over an embedded panel, not for an ordinary fresh popout).
-  function requestPlotState() {
+  // opened to take over an embedded panel, not for an ordinary fresh popout). `kind` picks
+  // which of the host's two panels to ask for - 'plot' (the default, 2D) or 'plot3d' - see
+  // startBridgeHost above.
+  function requestPlotState(kind = 'plot') {
     return new Promise((resolve, reject) => {
       const id = nextId++;
       const timer = setTimeout(() => {
@@ -122,7 +129,7 @@ export function connectBridgeClient({ sessionId, onDefinitions, onConnectionChan
         reject(new Error('Timed out waiting for the calculator tab to hand over its plot.'));
       }, EVAL_TIMEOUT_MS);
       pending.set(id, { resolve, reject, timer });
-      channel.postMessage({ type: 'request-plot-state', sessionId, id });
+      channel.postMessage({ type: 'request-plot-state', sessionId, id, kind });
     });
   }
 
