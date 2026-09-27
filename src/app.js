@@ -19,13 +19,16 @@ import { giacToLatex } from './lib/giacToLatex.js';
 import { typesetNode } from './lib/mathjax.js';
 import { applyEntryToDefinitions, parseDefinition, parseMultiDefinition, definitionLabel, vectorNames } from './lib/definitions.js';
 import { plottableInputForEntry, plottableOutputForEntry } from './lib/plottable.js';
+import { plottable3dInputForEntry, plottable3dOutputForEntry } from './lib/plottable3d.js';
 import { saveableForEntry } from './lib/saveable.js';
 import { displayListIndexAliases } from './lib/listIndexAlias.js';
 import { startBridgeHost } from './lib/plotBridge.js';
 import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
+import { DEFAULT_VIEW_3D, makeRow3d } from './lib/plotRows3d.js';
 import { makeInitialColumns } from './lib/tableColumns.js';
 import { HistoryEntry } from './components/historyEntry.js';
 import { PlotPanel } from './components/plotPanel.js';
+import { Plot3DPanel } from './components/plot3dPanel.js';
 import { TablePanel } from './components/tablePanel.js';
 import { Credits } from './components/credits.js';
 import { SettingsMenu } from './components/settingsMenu.js';
@@ -272,10 +275,13 @@ export function mountApp(root) {
     busy: false,
     definitions: new Map(),
     plotOpen: false,
+    plot3dOpen: false,
     tableOpen: false,
     mobileView: 'calculator',
     plotRows: [makeRow()],
     plotView: DEFAULT_VIEW,
+    plot3dRows: [makeRow3d()],
+    plot3dView: DEFAULT_VIEW_3D,
     tableColumns: makeInitialColumns(),
     angleMode: 'RAD',
     approxMode: false,
@@ -305,6 +311,7 @@ export function mountApp(root) {
   let plotHandoff = null;
   let bridgeHost = null;
   let plotPanelInstance = null;
+  let plot3dPanelInstance = null;
   let tablePanelInstance = null;
 
   const entryViews = []; // parallel to state.history
@@ -314,6 +321,11 @@ export function mountApp(root) {
   const title = h('h1', null, 'Calculator');
   const printBtn = h('button', { type: 'button', class: 'header__plotBtn', onclick: () => window.print() }, 'Print');
   const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, 'Plot');
+  const plot3dBtn = h(
+    'button',
+    { type: 'button', class: 'header__plotBtn', title: 'Alt+3', onclick: () => (state.plot3dOpen ? closePlot3d() : openPlot3d()) },
+    '3D Plot',
+  );
   const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, 'Table');
   const functionsMenu = FunctionsMenu({ onInsert: handleFunctionsMenuInsert });
   const distributionMenu = DistributionMenu({
@@ -368,6 +380,7 @@ export function mountApp(root) {
       { class: 'header__actions' },
       printBtn,
       plotBtn,
+      plot3dBtn,
       tableBtn,
       functionsMenu.root,
       variablesMenu.root,
@@ -534,13 +547,15 @@ export function mountApp(root) {
 
   const tabCalc = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('calculator') }, 'Calculator');
   const tabPlot = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot') }, 'Plot');
+  const tabPlot3d = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot3d') }, '3D Plot');
   const tabTable = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('table') }, 'Table');
-  const tabsBar = h('div', { class: 'layout__tabs' }, tabCalc, tabPlot, tabTable);
+  const tabsBar = h('div', { class: 'layout__tabs' }, tabCalc, tabPlot, tabPlot3d, tabTable);
   tabsBar.style.display = 'none';
 
   const plotItem = h('div', { class: 'layout__plotItem' });
+  const plot3dItem = h('div', { class: 'layout__plot3dItem' });
   const tableItem = h('div', { class: 'layout__tableItem' });
-  const sideColumn = h('div', { class: 'layout__side' }, plotItem, tableItem);
+  const sideColumn = h('div', { class: 'layout__side' }, plotItem, plot3dItem, tableItem);
   sideColumn.style.display = 'none';
 
   const layout = h('div', { class: 'layout' }, tabsBar, calcColumn, sideColumn);
@@ -555,20 +570,24 @@ export function mountApp(root) {
   // ---------- rendering helpers ----------
 
   function renderLayout() {
-    const split = state.plotOpen || state.tableOpen;
+    const split = state.plotOpen || state.plot3dOpen || state.tableOpen;
     layout.className = `layout${split ? ' layout--split' : ''}`;
     layout.dataset.mobileView = state.mobileView;
     tabsBar.style.display = split ? '' : 'none';
     tabPlot.style.display = state.plotOpen ? '' : 'none';
+    tabPlot3d.style.display = state.plot3dOpen ? '' : 'none';
     tabTable.style.display = state.tableOpen ? '' : 'none';
     tabCalc.classList.toggle('layout__tab--active', state.mobileView === 'calculator');
     tabPlot.classList.toggle('layout__tab--active', state.mobileView === 'plot');
+    tabPlot3d.classList.toggle('layout__tab--active', state.mobileView === 'plot3d');
     tabTable.classList.toggle('layout__tab--active', state.mobileView === 'table');
     sideColumn.style.display = split ? '' : 'none';
     plotItem.style.display = state.plotOpen ? '' : 'none';
+    plot3dItem.style.display = state.plot3dOpen ? '' : 'none';
     tableItem.style.display = state.tableOpen ? '' : 'none';
 
     plotBtn.classList.toggle('header__plotBtn--active', state.plotOpen);
+    plot3dBtn.classList.toggle('header__plotBtn--active', state.plot3dOpen);
     tableBtn.classList.toggle('header__plotBtn--active', state.tableOpen);
     printBtn.disabled = state.history.length === 0;
   }
@@ -677,6 +696,7 @@ export function mountApp(root) {
       onSelect: selectHistory,
       onDelete: deleteEntry,
       onPlot: (i, spec) => addExpressionToPlot(spec),
+      onPlot3d: (i, spec) => addExpressionToPlot3d(spec),
       onSave: (i, info) => handleSaveEntry(i, info),
       definitions: state.definitions,
     });
@@ -709,6 +729,7 @@ export function mountApp(root) {
         onSelect: selectHistory,
         onDelete: deleteEntry,
         onPlot: (idx, spec) => addExpressionToPlot(spec),
+        onPlot3d: (idx, spec) => addExpressionToPlot3d(spec),
         onSave: (idx, info) => handleSaveEntry(idx, info),
         definitions: state.definitions,
       });
@@ -1232,6 +1253,7 @@ export function mountApp(root) {
     if (next === state.definitions) return;
     state.definitions = next;
     plotPanelInstance?.setDefinitions(state.definitions);
+    plot3dPanelInstance?.setDefinitions(state.definitions);
     variablesMenu.update(state.definitions);
     bridgeHost?.notifyDefinitionsChanged();
   }
@@ -1347,16 +1369,29 @@ export function mountApp(root) {
     // "p" into the input, using whichever of plottableInputForEntry/plottableOutputForEntry
     // matches that half so e.g. a selected "y'=x-y" input plots the differential equation
     // itself while its selected output plots the solution curve instead (see lib/plottable.js).
-    // Only intercepted when that check actually finds something (see there and the entry's own
-    // always-visible "plot" buttons in historyEntry.js, which show under the same checks) -
-    // otherwise "p" types normally, same as any other key while browsing (see onInputChanged,
-    // which drops the selection the moment typing resumes).
+    // The 2D check runs first and wins whenever it finds something - a system that never
+    // mentions z is always shaped for the 2D panel, not the 3D one (see lib/plottable3d.js's own
+    // module comment for why that ordering means the two checks never actually compete) - and
+    // only when it finds nothing does the 3D check (lib/plottable3d.js) get a turn, sending a
+    // 2-variable surface or an x/y/z system to the 3D panel instead. Only intercepted when one
+    // of the two actually finds something (see there and the entry's own always-visible "plot"/
+    // "3d" buttons in historyEntry.js, which show under these same checks) - otherwise "p" types
+    // normally, same as any other key while browsing (see onInputChanged, which drops the
+    // selection the moment typing resumes).
     if (e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && step) {
       const entry = state.history[step.idx];
-      const plotSpec = step.part === 'input' ? plottableInputForEntry(entry, state.definitions) : plottableOutputForEntry(entry);
+      const plotSpec =
+        step.part === 'input' ? plottableInputForEntry(entry, state.definitions) : plottableOutputForEntry(entry);
       if (plotSpec) {
         e.preventDefault();
         addExpressionToPlot(plotSpec);
+        return;
+      }
+      const plot3dSpec =
+        step.part === 'input' ? plottable3dInputForEntry(entry, state.definitions) : plottable3dOutputForEntry(entry);
+      if (plot3dSpec) {
+        e.preventDefault();
+        addExpressionToPlot3d(plot3dSpec);
         return;
       }
     }
@@ -1423,16 +1458,23 @@ export function mountApp(root) {
   input.addEventListener('keydown', handleKeyDown);
   input.addEventListener('blur', hideCompletions);
 
-  // Alt+P/Alt+T toggle the plot and table panels from anywhere, including while the
-  // expression input is focused. Esc also jumps back to the expression input from a
+  // Alt+P/Alt+3/Alt+T toggle the plot, 3D plot and table panels from anywhere, including while
+  // the expression input is focused. Esc also jumps back to the expression input from a
   // plot/table field - the input's own keydown handler already owns Esc for itself, so
-  // this only fires when focus is actually inside one of the side panels.
+  // this only fires when focus is actually inside one of the side panels (both plot panels
+  // share the ".plot-panel" class - see components/plot3dPanel.js - so this one selector
+  // already covers both).
   window.addEventListener('keydown', (e) => {
     if (e.altKey && !e.ctrlKey && !e.metaKey) {
       const key = e.key.toLowerCase();
       if (key === 'p') {
         e.preventDefault();
         (state.plotOpen ? closePlot : openPlot)();
+        return;
+      }
+      if (key === '3') {
+        e.preventDefault();
+        (state.plot3dOpen ? closePlot3d : openPlot3d)();
         return;
       }
       if (key === 't') {
@@ -1539,6 +1581,16 @@ export function mountApp(root) {
     renderLayout();
   }
 
+  // Which side-panel tab a mobile layout should fall back to once the one it's currently
+  // showing gets closed (see closePlot/closePlot3d/closeTable below) - whichever of the
+  // remaining open panels comes first in this fixed order, or 'calculator' once none are.
+  function fallbackMobileView() {
+    if (state.plotOpen) return 'plot';
+    if (state.plot3dOpen) return 'plot3d';
+    if (state.tableOpen) return 'table';
+    return 'calculator';
+  }
+
   function openPlot() {
     state.plotOpen = true;
     state.mobileView = 'plot';
@@ -1622,8 +1674,64 @@ export function mountApp(root) {
 
   function closePlot() {
     state.plotOpen = false;
-    if (state.mobileView === 'plot') state.mobileView = state.tableOpen ? 'table' : 'calculator';
+    if (state.mobileView === 'plot') state.mobileView = fallbackMobileView();
     unmountPlotPanel();
+    renderLayout();
+    input.focus();
+  }
+
+  function openPlot3d() {
+    state.plot3dOpen = true;
+    state.mobileView = 'plot3d';
+    mountPlot3dPanel();
+    renderLayout();
+  }
+
+  // Sends a history entry's plottable-in-3D input or output (see lib/plottable3d.js) to the 3D
+  // plot panel - the 3D sibling of addExpressionToPlot above, wired the same way to the entry's
+  // "3d" buttons (historyEntry.js) and the "p" keyboard shortcut's own 3D fallback
+  // (handleKeyDown above). Kept as its own separate function/state (plot3dRows/plot3dOpen, its
+  // own panel instance) rather than a mode of the 2D plot - the 3D panel is a wholly different
+  // kind of view (Plotly-rendered surfaces/isosurfaces, no shared canvas/curve model with the 2D
+  // panel's own rows - see components/plot3dPanel.js).
+  const PLOT3D_SPEC_BLANK = {
+    surface: (r) => !r.expr.trim(),
+    parametric: (r) => !r.exprX.trim() && !r.exprY.trim() && !r.exprZ.trim(),
+    system: (r) => !r.exprSystem.trim(),
+  };
+  function applyPlot3dSpec(rows, { mode, patch }) {
+    const isBlank = PLOT3D_SPEC_BLANK[mode];
+    const sameModeIdx = rows.findIndex((r) => r.mode === mode && isBlank(r));
+    if (sameModeIdx !== -1) {
+      return rows.map((r, i) => (i === sameModeIdx ? { ...r, ...patch } : r));
+    }
+    const pristineIdx = mode !== 'surface' ? rows.findIndex((r) => r.mode === 'surface' && PLOT3D_SPEC_BLANK.surface(r)) : -1;
+    if (pristineIdx !== -1) {
+      return rows.map((r, i) => (i === pristineIdx ? { ...r, ...patch, mode } : r));
+    }
+    return [...rows, { ...makeRow3d(), mode, ...patch }];
+  }
+  function addExpressionToPlot3d(spec) {
+    const specs = Array.isArray(spec) ? spec : [spec];
+    const nextRows = specs.reduce(applyPlot3dSpec, state.plot3dRows);
+    state.plot3dRows = nextRows;
+
+    if (state.plot3dOpen) {
+      plot3dPanelInstance?.setRows(nextRows);
+      state.mobileView = 'plot3d';
+      renderLayout();
+      input.focus();
+    } else {
+      openPlot3d();
+      renderLayout();
+      setTimeout(() => input.focus(), 0);
+    }
+  }
+
+  function closePlot3d() {
+    state.plot3dOpen = false;
+    if (state.mobileView === 'plot3d') state.mobileView = fallbackMobileView();
+    unmountPlot3dPanel();
     renderLayout();
     input.focus();
   }
@@ -1637,7 +1745,7 @@ export function mountApp(root) {
 
   function closeTable() {
     state.tableOpen = false;
-    if (state.mobileView === 'table') state.mobileView = state.plotOpen ? 'plot' : 'calculator';
+    if (state.mobileView === 'table') state.mobileView = fallbackMobileView();
     unmountTablePanel();
     renderLayout();
     input.focus();
@@ -1667,6 +1775,31 @@ export function mountApp(root) {
     plotPanelInstance?.destroy();
     plotPanelInstance = null;
     clear(plotItem);
+  }
+
+  function mountPlot3dPanel() {
+    plot3dPanelInstance = Plot3DPanel({
+      evaluateRaw: giacEvaluateRaw,
+      rows: state.plot3dRows,
+      view: state.plot3dView,
+      onRowsChange: (rows) => {
+        state.plot3dRows = rows;
+      },
+      onViewChange: (next) => {
+        state.plot3dView = typeof next === 'function' ? next(state.plot3dView) : next;
+        plot3dPanelInstance?.setView(state.plot3dView);
+      },
+      onClose: closePlot3d,
+    });
+    plot3dPanelInstance.setDefinitions(state.definitions);
+    clear(plot3dItem);
+    plot3dItem.appendChild(plot3dPanelInstance.root);
+  }
+
+  function unmountPlot3dPanel() {
+    plot3dPanelInstance?.destroy();
+    plot3dPanelInstance = null;
+    clear(plot3dItem);
   }
 
   function mountTablePanel() {

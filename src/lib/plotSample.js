@@ -20,8 +20,10 @@ import {
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
-// (e.g. "0.5102e17") - confirmed against the actual engine.
-const NUMBER_RE = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i;
+// (e.g. "0.5102e17") - confirmed against the actual engine. Exported for lib/plotSample3d.js's
+// own list parsing (a 3D parametric surface's [x,y,z] triples), which needs the exact same
+// number-token recognition as every 2D list parser here.
+export const NUMBER_RE = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i;
 
 function formatNum(n) {
   return Number.isFinite(n) ? n.toString() : '0';
@@ -37,8 +39,9 @@ export function buildSampleExpr(expr, xmin, xmax, points) {
 }
 
 // Splits a Giac list's raw string body on top-level commas only, so a complex number like
-// `2.0+3.0*i` (no comma) or a nested `(1,2)` never gets cut in the wrong place.
-function splitTopLevel(inner) {
+// `2.0+3.0*i` (no comma) or a nested `(1,2)` never gets cut in the wrong place. Exported for
+// lib/plotSample3d.js's own triple-list parsing (see the note on NUMBER_RE above).
+export function splitTopLevel(inner) {
   const parts = [];
   let depth = 0;
   let start = 0;

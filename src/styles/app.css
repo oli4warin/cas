@@ -57,11 +57,13 @@
   }
 
   .layout--split[data-mobile-view='plot'] .layout__calc,
+  .layout--split[data-mobile-view='plot3d'] .layout__calc,
   .layout--split[data-mobile-view='table'] .layout__calc {
     display: none;
   }
 
   .layout--split[data-mobile-view='plot'] .layout__side,
+  .layout--split[data-mobile-view='plot3d'] .layout__side,
   .layout--split[data-mobile-view='table'] .layout__side {
     display: flex;
     flex-direction: column;
@@ -75,11 +77,18 @@
     min-height: 0;
   }
 
+  .layout--split[data-mobile-view='plot'] .layout__side > .layout__plot3dItem,
   .layout--split[data-mobile-view='plot'] .layout__side > .layout__tableItem {
     display: none;
   }
 
-  .layout--split[data-mobile-view='table'] .layout__side > .layout__plotItem {
+  .layout--split[data-mobile-view='plot3d'] .layout__side > .layout__plotItem,
+  .layout--split[data-mobile-view='plot3d'] .layout__side > .layout__tableItem {
+    display: none;
+  }
+
+  .layout--split[data-mobile-view='table'] .layout__side > .layout__plotItem,
+  .layout--split[data-mobile-view='table'] .layout__side > .layout__plot3dItem {
     display: none;
   }
 }
