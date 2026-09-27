@@ -1,11 +1,15 @@
 // Decides whether a history entry's *input* or *output* can be offered to the 3D plot panel -
 // the 3D sibling of lib/plottable.js, used the same way by the entry's own two "3d" buttons
-// (see components/historyEntry.js) and the "p" keyboard shortcut (see app.js). app.js tries the
-// 2D checks first and only falls back to these when that finds nothing, so a plain system in x
-// and y (no z anywhere) always offers the 2D plot it's actually shaped for - these only ever
-// match a 2-variable function definition or a system that actually mentions z somewhere (see
-// parseSystemLines' own allowedVars check, which is why a line with x/y alone already satisfies
-// the 2D check first and never reaches here).
+// (see components/historyEntry.js) and the "3" keyboard shortcut (see app.js's handleKeyDown,
+// where "p"/"3" are each other's exact 2D/3D siblings). The two *input* checks below never
+// overlap with lib/plottable.js's own plottableInputForEntry - a 2-variable function definition
+// or a system that actually mentions z (see parseSystemLines' own allowedVars check) isn't
+// something the 2D checks match either. The *output* check is different: plottable3dOutputForEntry
+// and plottable.js's plottableOutputForEntry deliberately DO both match a result free in both x
+// and y (e.g. "sin(x*y)") - that's a surface to the 3D panel and, just as validly, a curve in x
+// (with y along for the ride, same as any other extra free identifier - see plotParams.js) to
+// the 2D one, so both the "plot" and "3d" buttons/keys are offered for it at once rather than
+// one silently winning.
 
 import { parseDefinition } from './definitions.js';
 import { isPlottableInX, reinsertableValue } from './giac.js';

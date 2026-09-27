@@ -792,6 +792,7 @@ export function PlotPanel({
   let immediateResampleHandle = null;
   let requestId = 0;
   let dragState = null;
+  let rowsHidden = false;
   const rowViews = new Map(); // rowId -> RowView
   let pendingFocusRowId = null;
   // rowId -> "family|JSON(params)" already fitted (see fitDistributionView) - lets
@@ -819,14 +820,6 @@ export function PlotPanel({
   const closeBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: 'Close plot', onclick: () => onClose?.() }, '×');
   if (standalone || !onClose) closeBtn.style.display = 'none';
 
-  const header = h(
-    'div',
-    { class: 'plot-panel__header' },
-    h('span', { class: 'plot-panel__title' }, 'Plot'),
-    statusEl,
-    h('div', { class: 'plot-panel__headerActions' }, popOutBtn, closeBtn),
-  );
-
   const rowsContainer = h('div', { class: 'plot-panel__rows' });
   const addRowBtn = h('button', { type: 'button', class: 'plot-panel__addRow', onclick: () => addRow() }, '+ Add function');
   const rowsHint = h(
@@ -835,6 +828,32 @@ export function PlotPanel({
     'Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.',
   );
   rowsContainer.append(addRowBtn, rowsHint);
+
+  // Collapses the equation/function rows above the chart - some plots (a system with many
+  // lines, several distributions with sliders, ...) can take up more vertical space than the
+  // chart itself, so this frees that back up without losing anything already typed (rows/
+  // curves/state are all untouched - see setRowsHidden). Resets to visible every time the
+  // panel mounts (rowsHidden isn't lifted to app.js's state, same as aspectLocked below), same
+  // as reopening the panel always starting with rows shown.
+  const rowsToggleBtn = h(
+    'button',
+    { type: 'button', class: 'plot-panel__iconBtn', title: 'Hide equations', onclick: () => setRowsHidden(!rowsHidden) },
+    '▾',
+  );
+  function setRowsHidden(value) {
+    rowsHidden = value;
+    rowsContainer.style.display = rowsHidden ? 'none' : '';
+    rowsToggleBtn.textContent = rowsHidden ? '▸' : '▾';
+    rowsToggleBtn.title = rowsHidden ? 'Show equations' : 'Hide equations';
+  }
+
+  const header = h(
+    'div',
+    { class: 'plot-panel__header' },
+    h('span', { class: 'plot-panel__title' }, 'Plot'),
+    statusEl,
+    h('div', { class: 'plot-panel__headerActions' }, rowsToggleBtn, popOutBtn, closeBtn),
+  );
 
   const chipsWrap = h('div', { class: 'plot-panel__chips' });
   chipsWrap.style.display = 'none';

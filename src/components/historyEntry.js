@@ -16,9 +16,10 @@ import { vectorNames } from '../lib/definitions.js';
 // each only ever present when its own check actually found something to plot: the input's
 // button offers what the *equation/definition typed in* means (e.g. a differential equation's
 // vector field), the output's offers the *computed result* (e.g. that equation's solution
-// curve) - independently, so an entry can show either, both, or neither. Same two checks the
-// "p" keyboard shortcut uses on whichever half is currently selected (see app.js), so both
-// agree on exactly which half offers this. `onSave` is the same idea for the "save"
+// curve) - independently, so an entry can show either, both, or neither. Same checks the "p"
+// (2D)/"3" (3D) keyboard shortcuts use on whichever half is currently selected (see app.js),
+// so both agree on exactly which half offers this, and with which key. `onSave` is the same
+// idea for the "save"
 // button/"s" shortcut and saveableForEntry, called with (index, info) - `info` is either
 // { quickExpr } (a solve() result, saved outright) or { defaultName, value } (anything else,
 // opens the naming menu - see components/saveMenu.js) - see handleSaveEntry/app.js, which
@@ -74,14 +75,14 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
   // plottable (see inputPlotSpec/outputPlotSpec above) - stopPropagation keeps its click from
   // also bubbling to the row's own onclick (which would otherwise copy that half to the
   // clipboard at the same time).
-  function makeRowPlotBtn(spec, label, text, onClick) {
+  function makeRowPlotBtn(spec, label, text, key, onClick) {
     const btn = h(
       'button',
       {
         type: 'button',
         class: 'entry__rowPlot',
         'aria-label': label,
-        title: `${label} (p)`,
+        title: `${label} (${key})`,
         onclick: (e) => {
           e.stopPropagation();
           onClick(index, spec);
@@ -96,15 +97,18 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
     inputPlotSpec,
     'Plot this differential equation/function/distribution/integral/regression/system',
     'plot',
+    'p',
     onPlot,
   );
-  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result', 'plot', onPlot);
+  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result', 'plot', 'p', onPlot);
   // Same idea, offered to the 3D plot panel instead (see lib/plottable3d.js) - a 2-variable
   // function/surface or a system that actually mentions z. Independent of the two buttons
   // above: an entry offers whichever of the 2D/3D checks actually matches its own shape (see
-  // plottable3d.js's own module comment for why the two never both match the same half).
-  const input3dPlotBtn = makeRowPlotBtn(input3dPlotSpec, 'Plot this function/system in 3D', '3d', onPlot3d);
-  const output3dPlotBtn = makeRowPlotBtn(output3dPlotSpec, 'Plot this result in 3D', '3d', onPlot3d);
+  // plottable3d.js's own module comment for why the two never both match the same half). "3"
+  // rather than "p" - see app.js's handleKeyDown, where "p"/"3" are each other's exact 2D/3D
+  // siblings.
+  const input3dPlotBtn = makeRowPlotBtn(input3dPlotSpec, 'Plot this function/system in 3D', '3d', '3', onPlot3d);
+  const output3dPlotBtn = makeRowPlotBtn(output3dPlotSpec, 'Plot this result in 3D', '3d', '3', onPlot3d);
 
   const inputRow = h(
     'div',

@@ -288,7 +288,11 @@ function tracesForRow(row, index, sampled) {
 
 // evaluateRaw: (expr) => Promise<string>
 // onRowsChange(rows), onViewChange(view | (view) => view)
-export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange, onViewChange, onClose }) {
+// standalone/onPopOut/onClose: same meaning as the 2D panel's own (see plotPanel.js) - standalone
+// hides the close button and relabels the popout one ("open another window" vs. "move this plot
+// to a new window"), used the same way by app.js (embedded, onPopOut: popOutPlot3d) and
+// plot3dStandalone.js (standalone: true, onPopOut: popOutNewSession).
+export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange, onViewChange, standalone = false, onPopOut, onClose }) {
   let rows = initialRows;
   let definitions = new Map();
   let sampled = {}; // rowId -> { data, error }
@@ -298,20 +302,30 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   let pendingFocusRowId = null;
   let plotly = null;
   let plotInitialized = false;
+  let rowsHidden = false;
 
-  const loadErrorEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' });
-  loadErrorEl.style.display = 'none';
+  // The "reconnecting to the calculator tab" warning shown when standalone (popped out into
+  // its own window - see plot3dStandalone.js) and the bridge connection drops - same
+  // element/class/wording as the 2D panel's own statusEl (see plotPanel.js), toggled the same
+  // way via setConnectionStatus below. Distinct from loadingEl's own text just below, which
+  // instead reports the Plotly library itself failing to load.
+  const statusEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' }, 'Reconnecting to calculator…');
+  statusEl.style.display = 'none';
+
+  const popOutBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'plot-panel__iconBtn',
+      title: standalone ? 'Open another 3D plot window' : 'Move this plot to a new window',
+      onclick: () => onPopOut?.(),
+    },
+    '⧉',
+  );
+  if (!onPopOut) popOutBtn.style.display = 'none';
 
   const closeBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: 'Close plot', onclick: () => onClose?.() }, '×');
-  if (!onClose) closeBtn.style.display = 'none';
-
-  const header = h(
-    'div',
-    { class: 'plot-panel__header' },
-    h('span', { class: 'plot-panel__title' }, '3D Plot'),
-    loadErrorEl,
-    h('div', { class: 'plot-panel__headerActions' }, closeBtn),
-  );
+  if (standalone || !onClose) closeBtn.style.display = 'none';
 
   const rowsContainer = h('div', { class: 'plot-panel__rows' });
   const addRowBtn = h('button', { type: 'button', class: 'plot-panel__addRow', onclick: () => addRow() }, '+ Add surface');
@@ -321,6 +335,31 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
     'Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.',
   );
   rowsContainer.append(addRowBtn, rowsHint);
+
+  // Collapses the equation/function rows above the plot - same idea, same class, as the 2D
+  // panel's own rowsToggleBtn (see plotPanel.js) - frees up vertical space for the plot
+  // itself without losing anything already typed. Resets to visible every time the panel
+  // mounts, same as every other piece of this panel's purely-local UI state (plotly/
+  // plotInitialized above included) - none of it is lifted to app.js.
+  const rowsToggleBtn = h(
+    'button',
+    { type: 'button', class: 'plot-panel__iconBtn', title: 'Hide equations', onclick: () => setRowsHidden(!rowsHidden) },
+    '▾',
+  );
+  function setRowsHidden(value) {
+    rowsHidden = value;
+    rowsContainer.style.display = rowsHidden ? 'none' : '';
+    rowsToggleBtn.textContent = rowsHidden ? '▸' : '▾';
+    rowsToggleBtn.title = rowsHidden ? 'Show equations' : 'Hide equations';
+  }
+
+  const header = h(
+    'div',
+    { class: 'plot-panel__header' },
+    h('span', { class: 'plot-panel__title' }, '3D Plot'),
+    statusEl,
+    h('div', { class: 'plot-panel__headerActions' }, rowsToggleBtn, popOutBtn, closeBtn),
+  );
 
   // The sampling box every row draws inside - unlike the 2D panel's view, this never changes on
   // its own from mouse interaction (Plotly's own scene owns orbit/zoom/pan - see the module
@@ -575,20 +614,39 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   // when the panel closes (~4.5MB download) - `destroyed` guards both callbacks below so a
   // load that resolves after destroy() never touches the by-then-detached plotDiv, nor mutates
   // rows/state via focusOnMount's own emitRows() for a panel nobody's looking at anymore.
+  // `ready` resolves once this initial load has settled and focusOnMount has had its one
+  // chance to steal focus (win or lose) - app.js's addExpressionToPlot3d chains its own
+  // input.focus() after it instead of racing it with a fixed setTimeout, since the library
+  // is a genuine network fetch the first time a session opens this panel (near-instant every
+  // time after, once cached - see lib/plotly.js) and a fixed delay can't span both.
   let destroyed = false;
+  let resolveReady;
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve;
+  });
   renderRows();
   loadPlotly().then(
     (P) => {
-      if (destroyed) return;
+      if (destroyed) {
+        resolveReady();
+        return;
+      }
       plotly = P;
       loadingEl.style.display = 'none';
       redraw();
       scheduleResample();
-      setTimeout(focusOnMount, 0);
+      setTimeout(() => {
+        focusOnMount();
+        resolveReady();
+      }, 0);
     },
     (err) => {
-      if (destroyed) return;
+      if (destroyed) {
+        resolveReady();
+        return;
+      }
       loadingEl.textContent = err.message;
+      resolveReady();
     },
   );
 
@@ -601,6 +659,7 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
 
   return {
     root,
+    ready,
     setRows(next) {
       rows = next;
       renderRows();
@@ -618,6 +677,9 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
       definitions = next;
       renderRows();
       scheduleResample();
+    },
+    setConnectionStatus(status) {
+      statusEl.style.display = status === false ? '' : 'none';
     },
     destroy,
   };
