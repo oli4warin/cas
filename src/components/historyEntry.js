@@ -3,6 +3,7 @@ import { typesetNode } from '../lib/mathjax.js';
 import { linesToGatheredLatex } from '../lib/giacToLatex.js';
 import { reinsertableValue } from '../lib/giac.js';
 import { plottableInputForEntry, plottableOutputForEntry } from '../lib/plottable.js';
+import { plottable3dInputForEntry, plottable3dOutputForEntry } from '../lib/plottable3d.js';
 import { saveableForEntry } from '../lib/saveable.js';
 import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 import { vectorNames } from '../lib/definitions.js';
@@ -10,6 +11,8 @@ import { vectorNames } from '../lib/definitions.js';
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
 // `onPlot` is called with (index, spec) - spec being whatever plottableInputForEntry/
 // plottableOutputForEntry found (see there) - when one of the two "plot" buttons is clicked,
+// `onPlot3d` is the same idea for the two "3d" buttons/lib/plottable3d.js, sent to the separate
+// 3D plot panel instead (see app.js's addExpressionToPlot3d),
 // each only ever present when its own check actually found something to plot: the input's
 // button offers what the *equation/definition typed in* means (e.g. a differential equation's
 // vector field), the output's offers the *computed result* (e.g. that equation's solution
@@ -28,9 +31,11 @@ import { vectorNames } from '../lib/definitions.js';
 // lib/plotSystem.js). Neither affects anything already computed (entry.text/latex/raw are
 // exactly what evaluate() returned). `showText` is read fresh on every render() call too (App
 // owns that as global UI state).
-export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave, definitions }) {
+export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3d, onSave, definitions }) {
   const inputPlotSpec = plottableInputForEntry(entry, definitions);
   const outputPlotSpec = plottableOutputForEntry(entry);
+  const input3dPlotSpec = plottable3dInputForEntry(entry, definitions);
+  const output3dPlotSpec = plottable3dOutputForEntry(entry);
   const saveInfo = saveableForEntry(entry);
   let copiedTimeout = null;
 
@@ -69,7 +74,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
   // plottable (see inputPlotSpec/outputPlotSpec above) - stopPropagation keeps its click from
   // also bubbling to the row's own onclick (which would otherwise copy that half to the
   // clipboard at the same time).
-  function makeRowPlotBtn(spec, label) {
+  function makeRowPlotBtn(spec, label, text, onClick) {
     const btn = h(
       'button',
       {
@@ -79,16 +84,27 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
         title: `${label} (p)`,
         onclick: (e) => {
           e.stopPropagation();
-          onPlot(index, spec);
+          onClick(index, spec);
         },
       },
-      'plot',
+      text,
     );
     if (!spec) btn.style.display = 'none';
     return btn;
   }
-  const inputPlotBtn = makeRowPlotBtn(inputPlotSpec, 'Plot this differential equation/function/distribution/integral/regression/system');
-  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result');
+  const inputPlotBtn = makeRowPlotBtn(
+    inputPlotSpec,
+    'Plot this differential equation/function/distribution/integral/regression/system',
+    'plot',
+    onPlot,
+  );
+  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result', 'plot', onPlot);
+  // Same idea, offered to the 3D plot panel instead (see lib/plottable3d.js) - a 2-variable
+  // function/surface or a system that actually mentions z. Independent of the two buttons
+  // above: an entry offers whichever of the 2D/3D checks actually matches its own shape (see
+  // plottable3d.js's own module comment for why the two never both match the same half).
+  const input3dPlotBtn = makeRowPlotBtn(input3dPlotSpec, 'Plot this function/system in 3D', '3d', onPlot3d);
+  const output3dPlotBtn = makeRowPlotBtn(output3dPlotSpec, 'Plot this result in 3D', '3d', onPlot3d);
 
   const inputRow = h(
     'div',
@@ -96,6 +112,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     h('span', { class: 'entry__prompt' }, `In[${index + 1}]`),
     inputContent,
     inputPlotBtn,
+    input3dPlotBtn,
     inputCopied,
   );
 
@@ -110,6 +127,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onSave,
     h('span', { class: 'entry__prompt' }, `Out[${index + 1}]`),
     outputContent,
     outputPlotBtn,
+    output3dPlotBtn,
     outputCopied,
   );
 
