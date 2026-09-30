@@ -1,0 +1,86 @@
+.session-menu {
+  position: relative;
+}
+
+.session-menu__trigger {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.session-menu__trigger:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.session-menu__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.session-menu__trigger--active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.session-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 190px;
+  padding: 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transform-origin: top right;
+  animation: popIn 0.15s ease;
+}
+
+.session-menu__title {
+  padding: 2px 6px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.session-menu__item {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 5px;
+  border: none;
+  background: none;
+  color: var(--text-h);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.session-menu__item:hover {
+  background: var(--code-bg);
+  color: var(--accent);
+}
+
+.session-menu__item--danger:hover {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.session-menu__fileInput {
+  display: none;
+}
