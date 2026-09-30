@@ -25,7 +25,16 @@ import { displayListIndexAliases } from './lib/listIndexAlias.js';
 import { startBridgeHost } from './lib/plotBridge.js';
 import { DEFAULT_VIEW, makeRow } from './lib/plotRows.js';
 import { DEFAULT_VIEW_3D, makeRow3d } from './lib/plotRows3d.js';
-import { makeInitialColumns } from './lib/tableColumns.js';
+import { makeInitialColumns, makeColumn } from './lib/tableColumns.js';
+import {
+  buildSessionSnapshot,
+  reviveList,
+  saveSnapshotToLocalStorage,
+  loadSnapshotFromLocalStorage,
+  clearSnapshotFromLocalStorage,
+  parseSessionFileText,
+  downloadSessionSnapshot,
+} from './lib/sessionPersistence.js';
 import { HistoryEntry } from './components/historyEntry.js';
 import { PlotPanel } from './components/plotPanel.js';
 import { Plot3DPanel } from './components/plot3dPanel.js';
@@ -36,6 +45,7 @@ import { VariablesMenu } from './components/variablesMenu.js';
 import { FunctionsMenu } from './components/functionsMenu.js';
 import { DistributionMenu } from './components/distributionMenu.js';
 import { SaveMenu } from './components/saveMenu.js';
+import { SessionMenu } from './components/sessionMenu.js';
 import { RegressionMenu } from './components/regressionMenu.js';
 import { SysSolveMenu } from './components/sysSolveMenu.js';
 import { XCAS_COMMANDS } from './lib/xcasCommands.js';
@@ -321,6 +331,41 @@ export function mountApp(root) {
 
   const entryViews = []; // parallel to state.history
 
+  // ---------- session persistence ----------
+
+  // True while restoreSession()/clearSessionState() are rebuilding history/panel state from
+  // scratch - every individual step through there would otherwise trigger its own
+  // schedulePersist() (pushHistoryEntry, the plot/table panels' onRowsChange/onViewChange/
+  // onColumnsChange), which is both wasted work and, mid-restore, would overwrite the very
+  // snapshot still being read with a half-rebuilt one. The caller re-enables it and persists
+  // once, after the whole rebuild has landed.
+  let suspendPersist = false;
+  let persistTimer = null;
+
+  // Debounced so a plot being dragged/zoomed (onViewChange fires continuously) doesn't hit
+  // localStorage on every frame - see the plot/3D-plot/table panels' onRowsChange/onViewChange/
+  // onColumnsChange callbacks below, and pushHistoryEntry/deleteEntry, which all call this.
+  function schedulePersist() {
+    if (suspendPersist) return;
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      saveSnapshotToLocalStorage(buildSessionSnapshot(state));
+    }, 400);
+  }
+
+  // Flushes a still-pending debounced save immediately - used right before an action that
+  // itself replaces the session (load-from-file, clear) so the outgoing state is never lost
+  // mid-debounce, and on page unload so the last few hundred milliseconds of edits aren't
+  // dropped just because the tab closed before the timer fired.
+  function flushPersist() {
+    if (persistTimer == null) return;
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    saveSnapshotToLocalStorage(buildSessionSnapshot(state));
+  }
+  window.addEventListener('beforeunload', flushPersist);
+
   // ---------- static structure ----------
 
   const title = h('h1', null, 'Calculator');
@@ -374,6 +419,11 @@ export function mountApp(root) {
     onDigitsChange: handleDigitsChange,
   });
   const variablesMenu = VariablesMenu({ onPurge: purgeVariable });
+  const sessionMenu = SessionMenu({
+    onSaveToFile: handleSaveSessionToFile,
+    onLoadFile: handleLoadSessionFile,
+    onClear: handleClearSession,
+  });
   const statusPill = h('span', { class: 'status-pill' });
 
   const header = h(
@@ -389,6 +439,7 @@ export function mountApp(root) {
       tableBtn,
       functionsMenu.root,
       variablesMenu.root,
+      sessionMenu.root,
       settingsMenu.root,
       statusPill,
     ),
@@ -617,6 +668,7 @@ export function mountApp(root) {
     stopBtn.style.display = state.busy ? '' : 'none';
 
     functionsMenu.setDisabled(!engineReady);
+    sessionMenu.setDisabled(!engineReady || state.busy);
     settingsMenu.update({
       angleMode: state.angleMode,
       approx: state.approxMode,
@@ -741,6 +793,7 @@ export function mountApp(root) {
     renderHistoryEmptyState();
     renderLayout();
     scrollHistoryToBottom();
+    schedulePersist();
   }
 
   // Removes one In/Out pair from the visible history - via the hover × button, or Backspace
@@ -786,6 +839,7 @@ export function mountApp(root) {
     renderHistoryEmptyState();
     renderLayout();
     updateSelection();
+    schedulePersist();
   }
 
   // Clicking In[]/Out[] copies that part to the clipboard (see historyEntry.js) - this just
@@ -1784,10 +1838,12 @@ export function mountApp(root) {
       view: state.plotView,
       onRowsChange: (rows) => {
         state.plotRows = rows;
+        schedulePersist();
       },
       onViewChange: (next) => {
         state.plotView = typeof next === 'function' ? next(state.plotView) : next;
         plotPanelInstance?.setView(state.plotView);
+        schedulePersist();
       },
       onPopOut: popOutPlot,
       onClose: closePlot,
@@ -1810,10 +1866,12 @@ export function mountApp(root) {
       view: state.plot3dView,
       onRowsChange: (rows) => {
         state.plot3dRows = rows;
+        schedulePersist();
       },
       onViewChange: (next) => {
         state.plot3dView = typeof next === 'function' ? next(state.plot3dView) : next;
         plot3dPanelInstance?.setView(state.plot3dView);
+        schedulePersist();
       },
       onPopOut: popOutPlot3d,
       onClose: closePlot3d,
@@ -1834,6 +1892,7 @@ export function mountApp(root) {
       columns: state.tableColumns,
       onColumnsChange: (cols) => {
         state.tableColumns = cols;
+        schedulePersist();
       },
       onAssign: assignTableColumn,
       onPurge: purgeVariable,
@@ -1902,6 +1961,142 @@ export function mountApp(root) {
     renderLayout();
   }
 
+  // ---------- session management ----------
+
+  // Re-mounts whichever of the plot/3D-plot/table panels are currently open, so a session
+  // load/clear (which replaces state.plotRows/plot3dRows/plotView/plot3dView/tableColumns out
+  // from under an already-mounted panel) is picked up immediately instead of only showing up
+  // the next time that panel is opened by hand. A full remount rather than reaching for each
+  // panel's own setRows/setView (the table panel doesn't even have one - see mountTablePanel/
+  // TablePanel, which only ever reports column edits *outward* via onColumnsChange) is
+  // simplest here, and exactly what closing and reopening the panel would do anyway.
+  function remountOpenPanels() {
+    if (state.plotOpen) {
+      unmountPlotPanel();
+      mountPlotPanel();
+    }
+    if (state.plot3dOpen) {
+      unmountPlot3dPanel();
+      mountPlot3dPanel();
+    }
+    if (state.tableOpen) {
+      unmountTablePanel();
+      mountTablePanel();
+    }
+  }
+
+  // Wipes every trace of the current session - history, every defined variable/function
+  // (purged from the engine itself via purgeVariable's own `purge()` call, not just forgotten
+  // here), and the plot/3D-plot/table panels' own rows/view/columns - back to exactly what a
+  // brand-new page load starts with. Used by the "Clear session" button, and by
+  // handleLoadSessionFile before replaying a loaded one, so neither ever leaves the previous
+  // session's entries sitting above the new ones.
+  function clearSessionState() {
+    for (const name of state.definitions.keys()) giacEvaluateRaw(`purge(${name})`);
+    for (let i = 0; i < entryViews.length; i++) document.getElementById(`entry-${i}`)?.remove();
+    entryViews.length = 0;
+    state.history = [];
+    state.navPos = -1;
+    state.plotRows = [makeRow()];
+    state.plotView = DEFAULT_VIEW;
+    state.plot3dRows = [makeRow3d()];
+    state.plot3dView = DEFAULT_VIEW_3D;
+    state.tableColumns = makeInitialColumns();
+    setDefinitions(new Map());
+    renderHistoryEmptyState();
+    renderLayout();
+    updateSelection();
+  }
+
+  // Replays one saved history entry: restores its already-computed display (text/latex/raw/
+  // etc. - see lib/sessionPersistence.js's serializeEntry) straight into the notebook with no
+  // recomputation, so it reads exactly as it did when saved regardless of whatever the
+  // *current* digits/tau settings happen to be now - the same "an entry keeps whatever it
+  // already computed" rule handleDigitsChange/handleTauModeChange already follow for a plain
+  // reload. Since a defined variable/function only really lives inside the Giac engine's own
+  // memory - which a page reload always restarts from scratch - this then separately re-runs
+  // the entry's input through the engine purely to rebuild that binding: the freshly computed
+  // result is thrown away entirely, and state.definitions is instead folded forward from the
+  // *saved* entry (applyEntryToDefinitions only ever looks at `result.isError`, never at
+  // text/latex, so the saved entry serves that job exactly as well as a fresh evaluate() result
+  // would). An error entry or a mode-command easter egg (isCommand - see
+  // finishModeCommandEntry) never touched the engine to begin with, so both are skipped
+  // outright; pau/pi/tau mode themselves are deliberately never replayed at all (see
+  // state.pauMode's own "never persisted, session-only" comment above) - only the entry's own
+  // announcement text comes back, not whichever mode it was announcing.
+  async function replayHistoryEntry(entry) {
+    pushHistoryEntry(entry);
+    if (entry.isError || entry.isCommand) return;
+    const expr = normalizeDelCommand(joinInputLines(entry.input));
+    if (!expr) return;
+    try {
+      await giacEvaluate(expr, state.definitions);
+    } catch {
+      // Best-effort: if replaying this one line fails (e.g. it depended on some transient
+      // engine state that was never itself part of the saved session) the entry above still
+      // displays correctly either way - only a *later* entry that actually needs whatever
+      // variable it would have defined is affected.
+    }
+    setDefinitions(applyEntryToDefinitions(state.definitions, expr, entry));
+  }
+
+  // Rebuilds the whole session from a snapshot (see lib/sessionPersistence.js) - either the
+  // one silently restored from localStorage at boot, or one just picked via "Load from
+  // file…" (see handleLoadSessionFile, which clears the current session first). Suspends
+  // schedulePersist() for the duration: every step here (pushHistoryEntry, the rows/columns
+  // assignments below) would otherwise trigger its own debounced save, which is both wasted
+  // work and, mid-restore, would overwrite the very snapshot still being read.
+  async function restoreSession(snapshot) {
+    suspendPersist = true;
+    try {
+      for (const entry of snapshot.history ?? []) {
+        await replayHistoryEntry(entry);
+      }
+      state.plotRows = reviveList(snapshot.plotRows, makeRow) ?? state.plotRows;
+      if (snapshot.plotView) state.plotView = snapshot.plotView;
+      state.plot3dRows = reviveList(snapshot.plot3dRows, makeRow3d) ?? state.plot3dRows;
+      if (snapshot.plot3dView) state.plot3dView = snapshot.plot3dView;
+      state.tableColumns = reviveList(snapshot.tableColumns, () => makeColumn()) ?? state.tableColumns;
+      remountOpenPanels();
+    } finally {
+      suspendPersist = false;
+    }
+  }
+
+  function handleSaveSessionToFile() {
+    downloadSessionSnapshot(buildSessionSnapshot(state));
+  }
+
+  async function handleLoadSessionFile(file) {
+    let snapshot;
+    try {
+      snapshot = parseSessionFileText(await file.text());
+    } catch (err) {
+      window.alert(`Couldn't load that session file: ${err.message || err}`);
+      return;
+    }
+    if (!window.confirm('Loading this file replaces your current session. Continue?')) return;
+    flushPersist();
+    clearSessionState();
+    input.disabled = true;
+    await restoreSession(snapshot);
+    input.disabled = false;
+    schedulePersist();
+    input.focus();
+  }
+
+  function handleClearSession() {
+    if (!window.confirm("Clear the current session? This can't be undone.")) return;
+    clearSessionState();
+    remountOpenPanels();
+    clearSnapshotFromLocalStorage();
+    if (persistTimer != null) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    input.focus();
+  }
+
   // ---------- boot ----------
 
   renderLayout();
@@ -1910,7 +2105,7 @@ export function mountApp(root) {
   renderWarning();
 
   ensureGiacLoaded().then(
-    () => {
+    async () => {
       state.status = 'ready';
       renderStatus();
       renderHistoryEmptyState();
@@ -1919,6 +2114,20 @@ export function mountApp(root) {
       giacEvaluateRaw(state.angleMode === 'DEG' ? 'angle_radian(0)' : 'angle_radian(1)');
       giacEvaluateRaw(state.approxMode ? 'approx_mode(1)' : 'approx_mode(0)');
       giacSetAutosimplifyLevel(state.autosimplify);
+
+      // Silently restore whatever session (history + plot/3D-plot/table state) was last
+      // autosaved to this browser (see schedulePersist above) - so reloading the page picks
+      // up right where it left off instead of starting from a blank notebook every time.
+      // Input stays disabled for the duration - restoring replays every entry's input back
+      // through the engine to rebuild its variable bindings (see replayHistoryEntry), so
+      // typing something and submitting mid-restore could interleave with that replay.
+      const savedSnapshot = loadSnapshotFromLocalStorage();
+      if (savedSnapshot) {
+        input.disabled = true;
+        await restoreSession(savedSnapshot);
+        input.disabled = false;
+      }
+
       input.focus();
 
       // Answers eval requests from any window this session pops the 2D or 3D plot panel out
