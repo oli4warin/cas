@@ -13,6 +13,7 @@
 
 import { parseDefinition } from './definitions.js';
 import { isPlottableInX, reinsertableValue } from './giac.js';
+import { parseDiffEq } from './plotDiffEq.js';
 import { parseSystemLines } from './plotSystem.js';
 
 const XYZ = ['x', 'y', 'z'];
@@ -24,13 +25,28 @@ const XYZ = ['x', 'y', 'z'];
 // as a 'surface' row - or a system of one or more equations/inequalities in x, y and z (see
 // lib/plotSystem.js's parseSystemLines, called here with the 3-variable allowlist), offered as
 // that whole system verbatim, the same "one per line" shape the 3D panel's own 'system' row
-// takes (see lib/plotSample3d.js's sampleSystem3d).
+// takes (see lib/plotSample3d.js's sampleSystem3d). A differential equation in y (e.g. "y'=y")
+// is excluded from that system check the same way lib/plottable.js's own plottableInputForEntry
+// excludes it - parseSystemLine has no notion of "'" and would otherwise happily read "y'=y" as
+// an ordinary equation whose only free variable, "y", passes the x/y/z allowlist, offering a
+// nonsensical surface plot of a 1D ODE.
 export function plottable3dInputForEntry(entry, definitions = new Map()) {
   if (!entry || entry.isError) return null;
 
   const def = parseDefinition(entry.input);
   if (def && def.kind === 'function' && def.params.length === 2) {
     return { mode: 'surface', patch: { expr: `${def.name}(x,y)` } };
+  }
+
+  for (const rawLine of entry.input.split('\n')) {
+    const line = rawLine.trim().replace(/;\s*$/, '').trim();
+    if (!line) continue;
+    try {
+      parseDiffEq(line);
+      return null;
+    } catch {
+      // Not itself a 1st-/2nd-order equation in y - keep looking.
+    }
   }
 
   try {
