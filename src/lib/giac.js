@@ -331,6 +331,45 @@ export function normalizeSolveqCalls(expr) {
   return out;
 }
 
+// Giac's domain(f) with no variable argument always assumes "x" - domain(sqrt(t)) comes back as
+// just "x" (no restriction found, since no x appears) rather than t>=0. So a one-argument call
+// whose expression mentions exactly one free variable (see collectFreeVariables, declared
+// below) gets that variable appended, making domain(sqrt(t)) behave like domain(sqrt(t),t).
+// Zero or several free variables is ambiguous and left untouched for Giac's own "x" default,
+// as is a call that already names its variable. Same scanning skeleton as normalizeSolveqCalls
+// above, so it also works nested inside a larger expression.
+export function normalizeDomainCalls(expr, definitions = new Map()) {
+  let out = '';
+  let i = 0;
+  const n = expr.length;
+  while (i < n) {
+    if (/[A-Za-z_]/.test(expr[i])) {
+      IDENT_RE.lastIndex = i;
+      const name = IDENT_RE.exec(expr)[0];
+      let j = i + name.length;
+      if (name === 'domain' && expr[j] === '(') {
+        const close = findMatchingParen(expr, j);
+        if (close !== -1) {
+          const args = splitTopLevel(expr.slice(j + 1, close), ',').map((a) => normalizeDomainCalls(a.trim(), definitions));
+          if (args.length === 1) {
+            const freeVars = collectFreeVariables(expandKnownFunctionCalls(args[0], definitions), definitions);
+            if (freeVars.length === 1) args.push(freeVars[0]);
+          }
+          out += `domain(${args.join(',')})`;
+          i = close + 1;
+          continue;
+        }
+      }
+      out += name;
+      i = j;
+      continue;
+    }
+    out += expr[i];
+    i++;
+  }
+  return out;
+}
+
 function findMatchingBracket(s, openIdx) {
   let depth = 0;
   for (let i = openIdx; i < s.length; i++) {
@@ -2712,7 +2751,7 @@ export async function evaluate(expr, definitions) {
 
   const sentExpr = normalizeBareInfinity(
     normalizePowerCalls(
-      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
+      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeDomainCalls(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions), definitions))))),
     ),
   );
 
@@ -3074,7 +3113,7 @@ export async function evaluateApprox(expr, definitions) {
 
   const normalized = normalizeBareInfinity(
     normalizePowerCalls(
-      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions))))),
+      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeDomainCalls(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions), definitions))))),
     ),
   );
 
