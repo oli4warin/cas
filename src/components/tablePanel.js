@@ -405,5 +405,25 @@ export function TablePanel({ columns: initialColumns, evaluateRaw, onColumnsChan
     sheet = null;
   }
 
-  return { root, destroy };
+  // The table as it reads on screen, for the printed page (see app.js's printSession):
+  // {names, rows} with formula cells replaced by their results and trailing empty rows
+  // dropped - or null while there's nothing in it.
+  function getPrintData() {
+    const results = carriedOverResults();
+    const cols = columns.map((col, x) =>
+      col.cells.map((raw, y) => {
+        if (!isFormula(raw)) return raw;
+        const result = results?.[x]?.[y];
+        return result ? (result.error ? '#ERR' : result.value) : raw;
+      }),
+    );
+    const length = cols.reduce((max, cells) => Math.max(max, cells.findLastIndex((c) => String(c).trim()) + 1), 0);
+    if (length === 0) return null;
+    return {
+      names: columns.map((c, x) => c.name.trim() || columnLetter(x)),
+      rows: Array.from({ length }, (_, y) => cols.map((cells) => cells[y] ?? '')),
+    };
+  }
+
+  return { root, destroy, getPrintData };
 }

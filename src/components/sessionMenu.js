@@ -107,8 +107,8 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onPrint, onClear }) {
     trigger.disabled = disabled;
   }
 
-  // Printing only covers the history (see the print stylesheet in app.css), so there's nothing
-  // to print while it's empty.
+  // Printing covers the history plus any open plot/table (see app.js's printSession), so
+  // there's nothing to print while there's neither.
   function setPrintDisabled(disabled) {
     printBtn.disabled = disabled;
   }

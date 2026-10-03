@@ -125,10 +125,12 @@ function equalAspectView(view, width, height) {
   return { xmin: cx - newXRange / 2, xmax: cx + newXRange / 2, ymin: cy - newYRange / 2, ymax: cy + newYRange / 2 };
 }
 
-function draw(canvas, rawView, curves, aspectLocked) {
-  const dpr = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth;
-  const height = canvas.clientHeight;
+// `size` ({width, height, scale}) is only passed for a canvas that isn't laid out on the page
+// (see getPrintImage below), which has no clientWidth/clientHeight of its own to go by.
+function draw(canvas, rawView, curves, aspectLocked, size) {
+  const dpr = size?.scale ?? (window.devicePixelRatio || 1);
+  const width = size?.width ?? canvas.clientWidth;
+  const height = size?.height ?? canvas.clientHeight;
   if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -1425,6 +1427,19 @@ export function PlotPanel({
     },
     setConnectionStatus(status) {
       statusEl.style.display = status === false ? '' : 'none';
+    },
+    // The plot as a PNG data URL for the printed page (see app.js's printSession), or null
+    // while nothing is actually drawn. Redrawn onto a canvas of its own rather than copied
+    // from the live one: off the page it picks up none of the theme's --plot-* colors, so
+    // draw() falls back to its light defaults - what paper wants even in dark mode.
+    getPrintImage() {
+      const list = curveList();
+      const drawn = list.some((c) => c.visible && (Array.isArray(c.points) ? c.points.length > 0 : c.points));
+      if (!drawn) return null;
+      const size = { width: canvas.clientWidth || 600, height: canvas.clientHeight || 400, scale: 2 };
+      const printCanvas = document.createElement('canvas');
+      draw(printCanvas, view, list, aspectLocked, size);
+      return printCanvas.toDataURL('image/png');
     },
     destroy,
   };
