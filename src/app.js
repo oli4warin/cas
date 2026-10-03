@@ -370,14 +370,14 @@ export function mountApp(root) {
   // ---------- static structure ----------
 
   const title = h('h1', null, t('Calculator'));
-  const printBtn = h('button', { type: 'button', class: 'header__plotBtn', onclick: () => window.print() }, t('Print'));
-  const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, t('Plot'));
-  const plot3dBtn = h(
-    'button',
-    { type: 'button', class: 'header__plotBtn', title: 'Alt+3', onclick: () => (state.plot3dOpen ? closePlot3d() : openPlot3d()) },
-    t('3D Plot'),
-  );
-  const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, t('Table'));
+  // Header buttons that open/close the side panels. Their tooltips name the panel in full plus
+  // its shortcut; the 3D one's own label is shortened to "3D" since it sits right between
+  // "Plot" and "Table" in one joined group (see the header below).
+  const panelBtn = (label, name, shortcut, onclick) =>
+    h('button', { type: 'button', class: 'header__plotBtn', title: `${name} (${shortcut})`, onclick }, label);
+  const plotBtn = panelBtn(t('Plot'), t('Plot'), 'Alt+P', () => (state.plotOpen ? closePlot() : openPlot()));
+  const plot3dBtn = panelBtn('3D', t('3D Plot'), 'Alt+3', () => (state.plot3dOpen ? closePlot3d() : openPlot3d()));
+  const tableBtn = panelBtn(t('Table'), t('Table'), 'Alt+T', () => (state.tableOpen ? closeTable() : openTable()));
   const functionsMenu = FunctionsMenu({ onInsert: handleFunctionsMenuInsert });
   const distributionMenu = DistributionMenu({
     onSubmit: (expr) => {
@@ -423,26 +423,24 @@ export function mountApp(root) {
   const sessionMenu = SessionMenu({
     onSaveToFile: handleSaveSessionToFile,
     onLoadFile: handleLoadSessionFile,
+    onPrint: () => window.print(),
     onClear: handleClearSession,
   });
   const statusPill = h('span', { class: 'status-pill' });
 
+  // Left: what this is and whether it's ready. Right: the controls, grouped by what they act
+  // on - the side panels (one joined toggle group), the math helpers (function list,
+  // variables), and the app itself (session incl. printing, settings).
   const header = h(
     'header',
     { class: 'header' },
-    title,
+    h('div', { class: 'header__brand' }, title, statusPill),
     h(
       'div',
       { class: 'header__actions' },
-      printBtn,
-      plotBtn,
-      plot3dBtn,
-      tableBtn,
-      functionsMenu.root,
-      variablesMenu.root,
-      sessionMenu.root,
-      settingsMenu.root,
-      statusPill,
+      h('div', { class: 'header__group header__group--joined' }, plotBtn, plot3dBtn, tableBtn),
+      h('div', { class: 'header__group' }, functionsMenu.root, variablesMenu.root),
+      h('div', { class: 'header__group' }, sessionMenu.root, settingsMenu.root),
     ),
   );
 
@@ -653,7 +651,7 @@ export function mountApp(root) {
     plotBtn.classList.toggle('header__plotBtn--active', state.plotOpen);
     plot3dBtn.classList.toggle('header__plotBtn--active', state.plot3dOpen);
     tableBtn.classList.toggle('header__plotBtn--active', state.tableOpen);
-    printBtn.disabled = state.history.length === 0;
+    sessionMenu.setPrintDisabled(state.history.length === 0);
   }
 
   function renderStatus() {

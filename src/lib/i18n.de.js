@@ -9,7 +9,7 @@ export const DE = {
   // Main screen (app.js)
   'New line - same as Shift+Enter': 'Neue Zeile - wie Shift+Enter',
   'Calculator': 'Rechner',
-  'Print': 'Drucken',
+  'Print…': 'Drucken…',
   'Plot': 'Plot',
   '3D Plot': '3D-Plot',
   'Table': 'Tabelle',
@@ -44,7 +44,7 @@ export const DE = {
   'Enter an expression…': 'Ausdruck eingeben…',
   'Type an expression and press Enter. Examples:': 'Ausdruck eingeben und Enter drücken. Beispiele:',
   'Everything runs locally in your browser - no data is uploaded.':
-    'Alles läuft lokal im Browser - es werden keine Daten hochgeladen.',
+    'Alles läuft lokal in deinem Browser - es werden keine Daten hochgeladen.',
   'Formula preview': 'Formelvorschau',
   '{count} match:': '{count} Treffer:',
   '{count} matches:': '{count} Treffer:',

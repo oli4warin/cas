@@ -109,7 +109,7 @@ export function FunctionsMenu({ onInsert }) {
   const trigger = h(
     'button',
     { type: 'button', class: 'functions-menu__trigger', title: t('Functions'), 'aria-label': t('Functions'), onclick: toggle },
-    '☰',
+    'f(x)',
   );
   const panel = h('div', { class: 'functions-menu__panel' });
   root.append(trigger, panel);

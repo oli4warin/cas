@@ -76,6 +76,13 @@
   color: var(--accent);
 }
 
+.session-menu__item:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: none;
+  color: var(--text-h);
+}
+
 .session-menu__item--danger:hover {
   background: var(--error-bg);
   color: var(--error);

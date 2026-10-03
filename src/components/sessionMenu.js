@@ -7,7 +7,7 @@ import { t } from '../lib/i18n.js';
 // autosave/restore itself is silent (see persistSession/restoreSession in app.js) - this menu
 // only surfaces the explicit, user-triggered actions. Same open/close/outside-click/Escape
 // pattern as settingsMenu.js/variablesMenu.js.
-export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
+export function SessionMenu({ onSaveToFile, onLoadFile, onPrint, onClear }) {
   let open = false;
 
   const root = h('div', { class: 'session-menu' });
@@ -46,6 +46,19 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
   });
   const loadBtn = h('label', { class: 'session-menu__item' }, t('Load from file…'), fileInput);
 
+  const printBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'session-menu__item',
+      onclick: () => {
+        setOpen(false);
+        onPrint();
+      },
+    },
+    t('Print…'),
+  );
+
   const clearBtn = h(
     'button',
     {
@@ -65,6 +78,7 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
     h('div', { class: 'session-menu__title' }, t('Session')),
     saveBtn,
     loadBtn,
+    printBtn,
     clearBtn,
   );
 
@@ -93,5 +107,11 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
     trigger.disabled = disabled;
   }
 
-  return { root, setDisabled };
+  // Printing only covers the history (see the print stylesheet in app.css), so there's nothing
+  // to print while it's empty.
+  function setPrintDisabled(disabled) {
+    printBtn.disabled = disabled;
+  }
+
+  return { root, setDisabled, setPrintDisabled };
 }
