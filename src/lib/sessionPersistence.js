@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Serializes the calculator's visible session (history notebook + plot/3D-plot/table panel
 // state) to/from a plain JSON-safe snapshot - used for the browser-storage autosave and the
 // "save to file"/"load from file" buttons in the session menu (see components/sessionMenu.js
@@ -101,7 +102,7 @@ export function clearSnapshotFromLocalStorage() {
 // show as a warning, same as any other user-supplied file.
 export function parseSessionFileText(text) {
   const parsed = JSON.parse(text);
-  if (!isValidSnapshot(parsed)) throw new Error('That file doesn’t look like a saved session.');
+  if (!isValidSnapshot(parsed)) throw new Error(t('That file doesn’t look like a saved session.'));
   return parsed;
 }
 

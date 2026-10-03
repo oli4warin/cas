@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Turns a differential-equation plot row (e.g. "y''-y'-y=0", or just "y'=x-y") into the two
 // Giac expressions for the vector it draws at each grid point - see plotSample.js's
 // sampleDiffEqField, which asks the CAS to isolate the highest derivative and then batches the
@@ -43,11 +44,11 @@ function findTopLevelEquals(s) {
 export function parseDiffEq(rawText) {
   const renamed = renameDerivatives(rawText.trim());
   if (renamed.includes("'")) {
-    throw new Error("Only 1st- and 2nd-order derivatives (y', y'') are supported.");
+    throw new Error(t("Only 1st- and 2nd-order derivatives (y', y'') are supported."));
   }
   const order = renamed.includes('D2Y') ? 2 : renamed.includes('D1Y') ? 1 : 0;
   if (order === 0) {
-    throw new Error("Enter a differential equation in y, e.g. y'=x-y or y''-y'-y=0.");
+    throw new Error(t("Enter a differential equation in y, e.g. y'=x-y or y''-y'-y=0."));
   }
 
   const eqIdx = findTopLevelEquals(renamed);

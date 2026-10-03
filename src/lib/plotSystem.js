@@ -7,6 +7,7 @@
 // sampleComplexSystem for the actual grid evaluation and solve() round trips this builds on.
 
 import { collectFreeVariables, isFMaxFMinCall } from './giac.js';
+import { t } from './i18n.js';
 
 // Index/operator/length of the first top-level relational operator in `s` (outside any
 // (),[],{} nesting) - "<=", ">=", "!=", "<", ">", or a plain "=" (not ":=", "==", already
@@ -40,7 +41,7 @@ function findTopLevelRelation(s) {
 // worded the way the error messages below read naturally either way.
 function formatVarList(allowedVars) {
   if (allowedVars.length === 1) return allowedVars[0];
-  return `${allowedVars.slice(0, -1).join(', ')} and ${allowedVars[allowedVars.length - 1]}`;
+  return t('{list} and {last}', { list: allowedVars.slice(0, -1).join(', '), last: allowedVars[allowedVars.length - 1] });
 }
 
 // Parses one line into {raw, lhs, rhs, op, kind} - kind 'equation' for "=", 'inequality' for
@@ -54,15 +55,20 @@ export function parseSystemLine(rawLine, definitions = new Map(), allowedVars = 
   // fMax(...)/fMin(...) - even with a trailing "| condition" restriction, whose ">"/"<" would
   // otherwise look like a top-level relation right here - is a command that computes a value,
   // not an equation/inequality with a curve or region to plot. See isFMaxFMinCall in giac.js.
-  if (isFMaxFMinCall(line)) throw new Error(`"${line}" is not an equation or inequality in ${varList}.`);
+  if (isFMaxFMinCall(line)) throw new Error(t('"{line}" is not an equation or inequality in {vars}.', { line, vars: varList }));
   const rel = findTopLevelRelation(line);
-  if (!rel) throw new Error(`"${line}" is not an equation or inequality in ${varList}.`);
-  if (rel.op === '!=') throw new Error(`"${line}": "!=" can't be plotted as a curve or region.`);
+  if (!rel) throw new Error(t('"{line}" is not an equation or inequality in {vars}.', { line, vars: varList }));
+  if (rel.op === '!=') throw new Error(t('"{line}": "!=" can\'t be plotted as a curve or region.', { line }));
   const lhs = line.slice(0, rel.index).trim();
   const rhs = line.slice(rel.index + rel.length).trim();
   const extra = collectFreeVariables(`(${lhs})-(${rhs})`, definitions).filter((v) => !allowedVars.includes(v));
   if (extra.length > 0) {
-    throw new Error(`Only ${varList} ${allowedVars.length === 1 ? 'is' : 'are'} allowed here (found "${extra[0]}").`);
+    throw new Error(
+      t(allowedVars.length === 1 ? 'Only {vars} is allowed here (found "{found}").' : 'Only {vars} are allowed here (found "{found}").', {
+        vars: varList,
+        found: extra[0],
+      }),
+    );
   }
   return { raw: line, lhs, rhs, op: rel.op, kind: rel.op === '=' ? 'equation' : 'inequality' };
 }

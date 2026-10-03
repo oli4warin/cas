@@ -19,6 +19,7 @@ import { DEFAULT_VIEW, makeRow, defaultDistributionParams } from '../lib/plotRow
 import { collectRowParams, reconcileSliders } from '../lib/plotParams.js';
 import { DISTRIBUTION_FAMILIES } from '../lib/distributionParams.js';
 import { FormulaPreview } from './formulaPreview.js';
+import { t } from '../lib/i18n.js';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
 const SAMPLE_DEBOUNCE_MS = 150;
@@ -448,25 +449,25 @@ function createRowView({
   const swatch = h('input', {
     type: 'color',
     class: 'plot-row__swatch',
-    title: 'Curve color',
+    title: t('Curve color'),
     onchange: (e) => onColorChange(e.target.value),
   });
   const modeSelect = h(
     'select',
-    { class: 'plot-row__modeSelect', title: 'Plot type', onchange: (e) => onModeChange(e.target.value) },
+    { class: 'plot-row__modeSelect', title: t('Plot type'), onchange: (e) => onModeChange(e.target.value) },
     h('option', { value: 'function' }, 'y = f(x)'),
     h('option', { value: 'parametric' }, 'x(t), y(t)'),
-    h('option', { value: 'complex' }, 'z(t) complex'),
-    h('option', { value: 'scatter' }, 'scatter (x,y) data'),
-    h('option', { value: 'diffeq' }, 'differential equation'),
-    h('option', { value: 'distribution' }, 'probability distribution'),
-    h('option', { value: 'integral' }, 'definite integral'),
-    h('option', { value: 'system' }, 'system of equations (x,y)'),
-    h('option', { value: 'complexSystem' }, 'complex equations (z)'),
+    h('option', { value: 'complex' }, t('z(t) complex')),
+    h('option', { value: 'scatter' }, t('scatter (x,y) data')),
+    h('option', { value: 'diffeq' }, t('differential equation')),
+    h('option', { value: 'distribution' }, t('probability distribution')),
+    h('option', { value: 'integral' }, t('definite integral')),
+    h('option', { value: 'system' }, t('system of equations (x,y)')),
+    h('option', { value: 'complexSystem' }, t('complex equations (z)')),
   );
   const fieldsWrap = h('span');
   const toggleBtn = h('button', { type: 'button', class: 'plot-row__toggle', onclick: onToggle }, '●');
-  const removeBtn = h('button', { type: 'button', class: 'plot-row__remove', title: 'Remove', onclick: onRemove }, '×');
+  const removeBtn = h('button', { type: 'button', class: 'plot-row__remove', title: t('Remove'), onclick: onRemove }, '×');
   const errorSpan = h('span', { class: 'plot-row__error' });
   errorSpan.style.display = 'none';
   const slidersWrap = h('div', { class: 'plot-row__sliders' });
@@ -512,7 +513,7 @@ function createRowView({
       },
     });
     fieldEls[field] = input;
-    const preview = FormulaPreview({ className: 'plot-row__preview', placeholder: 'system preview' });
+    const preview = FormulaPreview({ className: 'plot-row__preview', placeholder: t('system preview') });
     previews[field] = preview;
     return h('span', { class: 'plot-row__field plot-row__field--system' }, input, preview.root);
   }
@@ -530,7 +531,7 @@ function createRowView({
       placeholder: '2*pi',
       oninput: (e) => onTChange('tmax', e.target.value),
     });
-    return h('span', { class: 'plot-row__tRange' }, 't:', tminEl, 'to', tmaxEl);
+    return h('span', { class: 'plot-row__tRange' }, 't:', tminEl, t('to'), tmaxEl);
   }
 
   // The family <select> plus its two always-present pieces (the params container, rebuilt
@@ -540,8 +541,8 @@ function createRowView({
   function makeDistributionFields() {
     familySelectEl = h(
       'select',
-      { class: 'plot-row__modeSelect', title: 'Distribution', onchange: (e) => onFamilyChange(e.target.value) },
-      ...Object.entries(DISTRIBUTION_FAMILIES).map(([key, cfg]) => h('option', { value: key }, cfg.label)),
+      { class: 'plot-row__modeSelect', title: t('Distribution'), onchange: (e) => onFamilyChange(e.target.value) },
+      ...Object.entries(DISTRIBUTION_FAMILIES).map(([key, cfg]) => h('option', { value: key }, t(cfg.label))),
     );
     paramsWrapEl = h('span', { class: 'plot-row__paramFields' });
     paramFamilyKey = null;
@@ -573,7 +574,7 @@ function createRowView({
   // above, just without a distribution's family <select>, per-family params, or probability
   // readout, none of which apply to a plain area-under-a-curve shading.
   function makeIntegralFields() {
-    const exprField = makeField('expr', 'f(x), e.g. x*sin(x)', 'f(x)');
+    const exprField = makeField('expr', t('f(x), e.g. x*sin(x)'), 'f(x)');
     lowerEl = h('input', {
       class: 'plot-row__tInput',
       type: 'text',
@@ -586,7 +587,7 @@ function createRowView({
       placeholder: '1',
       oninput: (e) => onBoundChange('upper', e.target.value),
     });
-    const bounds = h('span', { class: 'plot-row__tRange' }, 'from', lowerEl, 'to', upperEl);
+    const bounds = h('span', { class: 'plot-row__tRange' }, t('from'), lowerEl, t('to'), upperEl);
     return h('span', {}, exprField, bounds);
   }
 
@@ -602,11 +603,11 @@ function createRowView({
         const input = h('input', {
           class: 'plot-row__input plot-row__distParam',
           type: 'text',
-          placeholder: p.label,
+          placeholder: t(p.label),
           oninput: (e) => onParamInput(p.key, e.target.value),
         });
         paramEls[p.key] = input;
-        paramsWrapEl.append(h('label', { class: 'plot-row__distParamLabel' }, p.label, input));
+        paramsWrapEl.append(h('label', { class: 'plot-row__distParamLabel' }, t(p.label), input));
       }
     }
     for (const [key, input] of Object.entries(paramEls)) {
@@ -632,36 +633,39 @@ function createRowView({
     } else if (mode === 'integral') {
       fieldsWrap.append(makeIntegralFields());
     } else if (mode === 'parametric') {
-      fieldsWrap.append(makeField('exprX', 'x(t), e.g. cos(t)', 'x(t)'), makeField('exprY', 'y(t), e.g. sin(t)', 'y(t)'), makeTRange());
+      fieldsWrap.append(makeField('exprX', t('x(t), e.g. cos(t)'), 'x(t)'), makeField('exprY', t('y(t), e.g. sin(t)'), 'y(t)'), makeTRange());
     } else if (mode === 'complex') {
-      fieldsWrap.append(makeField('exprZ', 'z(t), e.g. exp(i*t)', 'z(t)'), makeTRange());
+      fieldsWrap.append(makeField('exprZ', t('z(t), e.g. exp(i*t)'), 'z(t)'), makeTRange());
     } else if (mode === 'scatter') {
       fieldsWrap.append(
-        makeField('exprX', 'x data, e.g. [1,2,3] or a column name', 'x data'),
-        makeField('exprY', 'y data, e.g. [4,5,6] or a column name', 'y data'),
+        makeField('exprX', t('x data, e.g. [1,2,3] or a column name'), t('x data')),
+        makeField('exprY', t('y data, e.g. [4,5,6] or a column name'), t('y data')),
       );
     } else if (mode === 'diffeq') {
-      const field = makeField('exprDE', "y'=f(x,y) or y''-y'-y=0", 'ODE');
-      field.title =
+      const field = makeField('exprDE', t("y'=f(x,y) or y''-y'-y=0"), t('ODE'));
+      field.title = t(
         "1st order (y'=...): direction field over the x/y axes. " +
-        "2nd order (y''=...): phase-plane vector field over y/y' instead (autonomous equations only).";
+          "2nd order (y''=...): phase-plane vector field over y/y' instead (autonomous equations only).",
+      );
       fieldsWrap.append(field);
     } else if (mode === 'system') {
       const field = makeMultilineField('exprSystem', 'x+y=5\nx-y=1\ny<3');
-      field.title =
+      field.title = t(
         'One equation or inequality per line, in x and y only - Shift+Enter for a new line. ' +
-        'Equations are traced as curves and (with 2+ of them) solved for their intersection ' +
-        'point(s); inequalities are shaded at 30% opacity.';
+          'Equations are traced as curves and (with 2+ of them) solved for their intersection ' +
+          'point(s); inequalities are shaded at 30% opacity.',
+      );
       fieldsWrap.append(field);
     } else if (mode === 'complexSystem') {
       const field = makeMultilineField('exprComplexSystem', 'abs(z)<2\nRe(z)>0');
-      field.title =
+      field.title = t(
         'One equation or inequality per line, in z only - Shift+Enter for a new line. Plotted ' +
-        'over the real/imaginary plane (z=x+i*y): equations are traced as curves, inequalities ' +
-        'shaded at 30% opacity.';
+          'over the real/imaginary plane (z=x+i*y): equations are traced as curves, inequalities ' +
+          'shaded at 30% opacity.',
+      );
       fieldsWrap.append(field);
     } else {
-      fieldsWrap.append(makeField('expr', 'e.g. sin(x), f(x), a*x+b, sin(x)|0<x<7', undefined));
+      fieldsWrap.append(makeField('expr', t('e.g. sin(x), f(x), a*x+b, sin(x)|0<x<7'), undefined));
     }
   }
 
@@ -675,13 +679,13 @@ function createRowView({
     const minEl = h('input', {
       type: 'number',
       class: 'plot-row__sliderBound',
-      title: 'Minimum',
+      title: t('Minimum'),
       oninput: (e) => onSliderRangeChange(name, 'min', e.target.value),
     });
     const maxEl = h('input', {
       type: 'number',
       class: 'plot-row__sliderBound',
-      title: 'Maximum',
+      title: t('Maximum'),
       oninput: (e) => onSliderRangeChange(name, 'max', e.target.value),
     });
     const rangeEl = h('input', {
@@ -754,7 +758,7 @@ function createRowView({
     updateSliders(row.sliders ?? {});
 
     toggleBtn.textContent = row.visible ? '●' : '○';
-    toggleBtn.title = row.visible ? 'Hide' : 'Show';
+    toggleBtn.title = row.visible ? t('Hide') : t('Show');
 
     if (errorMessage) {
       errorSpan.textContent = errorMessage;
@@ -802,7 +806,7 @@ export function PlotPanel({
   const distFitSignatures = new Map();
   let distFitTimer = null;
 
-  const statusEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' }, 'Reconnecting to calculator…');
+  const statusEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' }, t('Reconnecting to calculator…'));
   statusEl.style.display = 'none';
 
   const popOutBtn = h(
@@ -810,22 +814,22 @@ export function PlotPanel({
     {
       type: 'button',
       class: 'plot-panel__iconBtn',
-      title: standalone ? 'Open another plot window' : 'Move this plot to a new window',
+      title: standalone ? t('Open another plot window') : t('Move this plot to a new window'),
       onclick: () => onPopOut?.(),
     },
     '⧉',
   );
   if (!onPopOut) popOutBtn.style.display = 'none';
 
-  const closeBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: 'Close plot', onclick: () => onClose?.() }, '×');
+  const closeBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: t('Close plot'), onclick: () => onClose?.() }, '×');
   if (standalone || !onClose) closeBtn.style.display = 'none';
 
   const rowsContainer = h('div', { class: 'plot-panel__rows' });
-  const addRowBtn = h('button', { type: 'button', class: 'plot-panel__addRow', onclick: () => addRow() }, '+ Add function');
+  const addRowBtn = h('button', { type: 'button', class: 'plot-panel__addRow', onclick: () => addRow() }, t('+ Add function'));
   const rowsHint = h(
     'span',
     { class: 'plot-panel__hint' },
-    'Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.',
+    t('Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.'),
   );
   rowsContainer.append(addRowBtn, rowsHint);
 
@@ -837,20 +841,20 @@ export function PlotPanel({
   // as reopening the panel always starting with rows shown.
   const rowsToggleBtn = h(
     'button',
-    { type: 'button', class: 'plot-panel__iconBtn', title: 'Hide equations', onclick: () => setRowsHidden(!rowsHidden) },
+    { type: 'button', class: 'plot-panel__iconBtn', title: t('Hide equations'), onclick: () => setRowsHidden(!rowsHidden) },
     '▾',
   );
   function setRowsHidden(value) {
     rowsHidden = value;
     rowsContainer.style.display = rowsHidden ? 'none' : '';
     rowsToggleBtn.textContent = rowsHidden ? '▸' : '▾';
-    rowsToggleBtn.title = rowsHidden ? 'Show equations' : 'Hide equations';
+    rowsToggleBtn.title = rowsHidden ? t('Show equations') : t('Hide equations');
   }
 
   const header = h(
     'div',
     { class: 'plot-panel__header' },
-    h('span', { class: 'plot-panel__title' }, 'Plot'),
+    h('span', { class: 'plot-panel__title' }, t('Plot')),
     statusEl,
     h('div', { class: 'plot-panel__headerActions' }, rowsToggleBtn, popOutBtn, closeBtn),
   );
@@ -861,15 +865,15 @@ export function PlotPanel({
   const canvas = h('canvas', { class: 'plot-panel__canvas' });
   const aspectBtn = h(
     'button',
-    { type: 'button', class: 'plot-panel__aspectBtn plot-panel__aspectBtn--active', title: 'Equidistant units (click for independent x/y scaling)' },
+    { type: 'button', class: 'plot-panel__aspectBtn plot-panel__aspectBtn--active', title: t('Equidistant units (click for independent x/y scaling)') },
     '1:1',
   );
   function setAspectLocked(value) {
     aspectLocked = value;
     aspectBtn.classList.toggle('plot-panel__aspectBtn--active', aspectLocked);
     aspectBtn.title = aspectLocked
-      ? 'Equidistant units (click for independent x/y scaling)'
-      : 'Independent x/y scaling (click for equidistant units)';
+      ? t('Equidistant units (click for independent x/y scaling)')
+      : t('Independent x/y scaling (click for equidistant units)');
   }
   aspectBtn.addEventListener('click', () => {
     setAspectLocked(!aspectLocked);
@@ -879,9 +883,9 @@ export function PlotPanel({
   const zoomControls = h(
     'div',
     { class: 'plot-panel__zoomControls' },
-    h('button', { type: 'button', title: 'Zoom in', onclick: () => zoom(1 / 1.4) }, '+'),
-    h('button', { type: 'button', title: 'Zoom out', onclick: () => zoom(1.4) }, '−'),
-    h('button', { type: 'button', title: 'Reset view', onclick: () => onViewChange(DEFAULT_VIEW) }, '⟲'),
+    h('button', { type: 'button', title: t('Zoom in'), onclick: () => zoom(1 / 1.4) }, '+'),
+    h('button', { type: 'button', title: t('Zoom out'), onclick: () => zoom(1.4) }, '−'),
+    h('button', { type: 'button', title: t('Reset view'), onclick: () => onViewChange(DEFAULT_VIEW) }, '⟲'),
     aspectBtn,
   );
 

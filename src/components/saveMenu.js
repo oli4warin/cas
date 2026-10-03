@@ -1,4 +1,5 @@
 import { h } from '../lib/dom.js';
+import { t } from '../lib/i18n.js';
 
 // Modal opened by a history entry's "save" button (or the "s" keyboard shortcut on a
 // selected output - see saveableForEntry/lib/saveable.js, which decides which entries offer
@@ -15,22 +16,22 @@ import { h } from '../lib/dom.js';
 export function SaveMenu({ onSubmit, onCancel }) {
   let current = null; // { value, index } of the output currently being saved, or null when closed
 
-  const nameInput = h('input', { type: 'text', class: 'distribution-menu__input', autocomplete: 'off', placeholder: 'a or f(x)' });
+  const nameInput = h('input', { type: 'text', class: 'distribution-menu__input', autocomplete: 'off', placeholder: t('a or f(x)') });
   const valuePreview = h('div', { class: 'distribution-menu__label' });
-  const cancelBtn = h('button', { type: 'button', class: 'distribution-menu__btn distribution-menu__btn--ghost', onclick: cancel }, 'Cancel');
-  const submitBtn = h('button', { type: 'submit', class: 'distribution-menu__btn distribution-menu__btn--primary' }, 'Save');
+  const cancelBtn = h('button', { type: 'button', class: 'distribution-menu__btn distribution-menu__btn--ghost', onclick: cancel }, t('Cancel'));
+  const submitBtn = h('button', { type: 'submit', class: 'distribution-menu__btn distribution-menu__btn--primary' }, t('Save'));
   const form = h(
     'form',
     { class: 'distribution-menu__form', onsubmit: handleSubmit },
     h(
       'div',
       { class: 'distribution-menu__fields' },
-      h('label', { class: 'distribution-menu__field' }, h('span', { class: 'distribution-menu__label' }, 'Save as'), nameInput),
+      h('label', { class: 'distribution-menu__field' }, h('span', { class: 'distribution-menu__label' }, t('Save as')), nameInput),
       valuePreview,
     ),
     h('div', { class: 'distribution-menu__actions' }, cancelBtn, submitBtn),
   );
-  const card = h('div', { class: 'distribution-menu__card' }, h('h2', { class: 'distribution-menu__title' }, 'Save'), form);
+  const card = h('div', { class: 'distribution-menu__card' }, h('h2', { class: 'distribution-menu__title' }, t('Save')), form);
   const backdrop = h('div', { class: 'distribution-menu__backdrop', onmousedown: (e) => e.target === backdrop && cancel() }, card);
   backdrop.style.display = 'none';
 

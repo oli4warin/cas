@@ -2,6 +2,7 @@ import { h, clear } from '../lib/dom.js';
 import { definitionLabel, vectorNames } from '../lib/definitions.js';
 import { giacToLatex } from '../lib/giacToLatex.js';
 import { typesetNode } from '../lib/mathjax.js';
+import { t } from '../lib/i18n.js';
 
 // Popover listing every variable/function the user has defined this CAS session (see
 // state.definitions in app.js) with its current value/formula, and a small button to purge
@@ -14,12 +15,12 @@ export function VariablesMenu({ onPurge }) {
   const root = h('div', { class: 'variables-menu' });
   const trigger = h(
     'button',
-    { type: 'button', class: 'variables-menu__trigger', title: 'Variables (Alt+V)', onclick: toggle },
-    'Vars',
+    { type: 'button', class: 'variables-menu__trigger', title: t('Variables (Alt+V)'), onclick: toggle },
+    t('Vars'),
   );
   const list = h('div', { class: 'variables-menu__list' });
-  const emptyHint = h('div', { class: 'variables-menu__empty' }, 'No variables defined yet.');
-  const panel = h('div', { class: 'variables-menu__panel' }, h('div', { class: 'variables-menu__title' }, 'Variables'), list, emptyHint);
+  const emptyHint = h('div', { class: 'variables-menu__empty' }, t('No variables defined yet.'));
+  const panel = h('div', { class: 'variables-menu__panel' }, h('div', { class: 'variables-menu__title' }, t('Variables')), list, emptyHint);
 
   root.append(trigger, panel);
 
@@ -56,7 +57,7 @@ export function VariablesMenu({ onPurge }) {
           valueEl,
           h(
             'button',
-            { type: 'button', class: 'variables-menu__remove', title: `Delete ${def.name}`, onclick: () => onPurge(def.name) },
+            { type: 'button', class: 'variables-menu__remove', title: t('Delete {name}', { name: def.name }), onclick: () => onPurge(def.name) },
             '×',
           ),
         ),

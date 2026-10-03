@@ -1,5 +1,6 @@
 import { h } from '../lib/dom.js';
 import { SOLVE_MODES } from '../lib/sysSolveParams.js';
+import { t } from '../lib/i18n.js';
 
 // Modal opened when the input holds nothing but the bare "syssolve" command (see
 // isSysSolveMenuCommand/app.js's Enter handling) - lets a system of equations be typed one
@@ -22,18 +23,18 @@ export function SysSolveMenu({ onSubmit, onCancel }) {
   const modeSelect = h(
     'select',
     { class: 'distribution-menu__input' },
-    ...SOLVE_MODES.map((m) => h('option', { value: m.name }, m.label)),
+    ...SOLVE_MODES.map((m) => h('option', { value: m.name }, t(m.label))),
   );
   const field = (label, input) => h('label', { class: 'distribution-menu__field' }, h('span', { class: 'distribution-menu__label' }, label), input);
   const fieldsWrap = h(
     'div',
     { class: 'distribution-menu__fields' },
-    field('Equations (one per line)', eqsInput),
-    field('Solve for', varsInput),
-    field('Mode', modeSelect),
+    field(t('Equations (one per line)'), eqsInput),
+    field(t('Solve for'), varsInput),
+    field(t('Mode'), modeSelect),
   );
-  const cancelBtn = h('button', { type: 'button', class: 'distribution-menu__btn distribution-menu__btn--ghost', onclick: cancel }, 'Cancel');
-  const submitBtn = h('button', { type: 'submit', class: 'distribution-menu__btn distribution-menu__btn--primary' }, 'Compute');
+  const cancelBtn = h('button', { type: 'button', class: 'distribution-menu__btn distribution-menu__btn--ghost', onclick: cancel }, t('Cancel'));
+  const submitBtn = h('button', { type: 'submit', class: 'distribution-menu__btn distribution-menu__btn--primary' }, t('Compute'));
   const form = h(
     'form',
     { class: 'distribution-menu__form', onsubmit: handleSubmit },

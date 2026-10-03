@@ -314,10 +314,20 @@ function isVectorNode(node) {
   return node.items.every((item) => item && item.type !== 'bracket' && item.type !== 'brace');
 }
 
+// Number of components of a vector node (see isVectorNode above): the length of a flat list or
+// row vector, the number of rows of a column vector.
+function vectorDimension(node) {
+  if (!isMatrixNode(node)) return node.items.length;
+  return node.items.length === 1 ? node.items[0].items.length : node.items.length;
+}
+
 // Whether a definition's raw right-hand side (see applyEntryToDefinitions/lib/definitions.js)
 // is a vector literal - used there to decide whether the saved name should render with an
-// overhead arrow (see renderVarName below) everywhere it's typed afterwards. Syntax-only, same
-// as the rest of this module: no engine round trip, so it only recognizes vectors written
+// overhead arrow (see renderVarName below) everywhere it's typed afterwards. Only a 2D or 3D
+// one counts: the arrow is the notation for a geometric vector, while a longer (or
+// one-element) list is just data - a table column ("xs:=[1,2,3,4,5]", see
+// components/tablePanel.js), a sample for a regression - that shouldn't grow one. Syntax-only,
+// same as the rest of this module: no engine round trip, so it only recognizes vectors written
 // directly as bracket literals, not e.g. a name that merely evaluates to one ("b:=a" right
 // after "a:=[1,2,3]").
 export function isVectorLiteral(src) {
@@ -327,7 +337,9 @@ export function isVectorLiteral(src) {
     const parser = makeParser(tokens);
     const node = parser.parseExpression(0);
     if (parser.peekComma()) return false;
-    return isVectorNode(node);
+    if (!isVectorNode(node)) return false;
+    const dimension = vectorDimension(node);
+    return dimension === 2 || dimension === 3;
   } catch {
     return false;
   }

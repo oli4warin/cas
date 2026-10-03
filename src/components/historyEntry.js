@@ -7,6 +7,7 @@ import { plottable3dInputForEntry, plottable3dOutputForEntry } from '../lib/plot
 import { saveableForEntry } from '../lib/saveable.js';
 import { displayListIndexAliases } from '../lib/listIndexAlias.js';
 import { vectorNames } from '../lib/definitions.js';
+import { t } from '../lib/i18n.js';
 
 // Renders one In[]/Out[] pair. `onSelect`/`onDelete` are called with this entry's index;
 // `onPlot` is called with (index, spec) - spec being whatever plottableInputForEntry/
@@ -43,7 +44,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
   const inputMath = h('span', { class: 'entry__math' });
   const inputText = h('span', { class: 'entry__inputText' }, entry.input);
   const inputRawText = h('span', { class: 'entry__rawText' }, entry.input);
-  const inputCopied = h('span', { class: 'entry__copied' }, 'Copied');
+  const inputCopied = h('span', { class: 'entry__copied' }, t('Copied'));
   inputCopied.style.display = 'none';
   const inputContent = h('div', { class: 'entry__content' }, inputMath, inputText, inputRawText);
 
@@ -67,7 +68,7 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
       )
     : h('span', { class: 'entry__plainText' }, entry.text);
   const outputRawText = h('span', { class: 'entry__rawText' }, entry.text);
-  const outputCopied = h('span', { class: 'entry__copied' }, 'Copied');
+  const outputCopied = h('span', { class: 'entry__copied' }, t('Copied'));
   outputCopied.style.display = 'none';
   const outputContent = h('div', { class: 'entry__content' }, resultMath, errorText, plainText, outputRawText);
 
@@ -95,20 +96,20 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
   }
   const inputPlotBtn = makeRowPlotBtn(
     inputPlotSpec,
-    'Plot this differential equation/function/distribution/integral/regression/system',
+    t('Plot this differential equation/function/distribution/integral/regression/system'),
     'plot',
     'p',
     onPlot,
   );
-  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, 'Plot this result', 'plot', 'p', onPlot);
+  const outputPlotBtn = makeRowPlotBtn(outputPlotSpec, t('Plot this result'), 'plot', 'p', onPlot);
   // Same idea, offered to the 3D plot panel instead (see lib/plottable3d.js) - a 2-variable
   // function/surface or a system that actually mentions z. Independent of the two buttons
   // above: an entry offers whichever of the 2D/3D checks actually matches its own shape (see
   // plottable3d.js's own module comment for why the two never both match the same half). "3"
   // rather than "p" - see app.js's handleKeyDown, where "p"/"3" are each other's exact 2D/3D
   // siblings.
-  const input3dPlotBtn = makeRowPlotBtn(input3dPlotSpec, 'Plot this function/system in 3D', '3d', '3', onPlot3d);
-  const output3dPlotBtn = makeRowPlotBtn(output3dPlotSpec, 'Plot this result in 3D', '3d', '3', onPlot3d);
+  const input3dPlotBtn = makeRowPlotBtn(input3dPlotSpec, t('Plot this function/system in 3D'), '3d', '3', onPlot3d);
+  const output3dPlotBtn = makeRowPlotBtn(output3dPlotSpec, t('Plot this result in 3D'), '3d', '3', onPlot3d);
 
   const inputRow = h(
     'div',
@@ -140,8 +141,8 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
     {
       type: 'button',
       class: 'entry__delete',
-      'aria-label': 'Delete this input/output pair',
-      title: 'Delete',
+      'aria-label': t('Delete this input/output pair'),
+      title: t('Delete'),
       onclick: () => onDelete(index),
     },
     '×',
@@ -167,20 +168,20 @@ export function HistoryEntry({ entry, index, onSelect, onDelete, onPlot, onPlot3
     {
       type: 'button',
       class: `entry__save${entry.savedAs ? ' entry__save--saved' : ''}`,
-      'aria-label': 'Save this result',
-      title: 'Save this result (s)',
+      'aria-label': t('Save this result'),
+      title: t('Save this result (s)'),
       onclick: (e) => {
         e.stopPropagation();
         onSave(index, saveInfo);
       },
     },
-    entry.savedAs ? `saved to ${entry.savedAs}` : 'save',
+    entry.savedAs ? t('saved to {name}', { name: entry.savedAs }) : t('save'),
   );
   if (!saveInfo) saveBtn.style.display = 'none';
 
   function setSavedLabel(label) {
     entry.savedAs = label;
-    saveBtn.textContent = `saved to ${label}`;
+    saveBtn.textContent = t('saved to {name}', { name: label });
     saveBtn.classList.add('entry__save--saved');
   }
 

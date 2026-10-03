@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Plotly.js powers the 3D plot panel (surfaces, parametric surfaces, isosurfaces/volumes for
 // systems in x/y/z - see components/plot3dPanel.js) but is a large library (~4.5MB minified)
 // most sessions never touch, unlike MathJax (loaded unconditionally in index.html since every
@@ -18,7 +19,7 @@ export function loadPlotly() {
     script.onload = () => resolve(window.Plotly);
     script.onerror = () => {
       loadPromise = null;
-      reject(new Error('Could not load the 3D plotting library.'));
+      reject(new Error(t('Could not load the 3D plotting library.')));
     };
     document.head.appendChild(script);
   });

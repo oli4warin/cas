@@ -287,6 +287,10 @@
   margin-top: 8px;
 }
 
+.empty-hint__privacy {
+  margin-top: 20px;
+}
+
 .loading-bar {
   width: 160px;
   height: 4px;

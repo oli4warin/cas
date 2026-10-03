@@ -19,6 +19,18 @@ licensed under the [Apache License 2.0](https://github.com/mathjax/MathJax/blob/
 3D plots are rendered by [Plotly.js](https://plotly.com/javascript/) and its contributors,
 licensed under the [MIT License](https://github.com/plotly/plotly.js/blob/master/LICENSE).
 
+The table's grid is [Jspreadsheet CE](https://bossanova.uk/jspreadsheet/) (with
+[jSuites](https://jsuites.net/)) and its contributors, licensed under the
+[MIT License](https://github.com/jspreadsheet/ce/blob/master/LICENSE).
+
+## Languages
+
+The interface is English, or Swiss Standard German when the browser's preferred language is
+any German variant (`de`, `de-CH`, `de-DE`, ...). Append `?lang=en` or `?lang=de` to the URL
+to force one. Texts live in `src/lib/i18n.de.js`, keyed by their English source text; code
+passes every user-visible string through `t()` from `src/lib/i18n.js`. Giac's own messages
+and command names are not translated.
+
 ## Running it
 
 Because it uses ES modules (`<script type="module">`) and a Web Worker, it must be served

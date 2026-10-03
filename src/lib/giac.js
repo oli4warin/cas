@@ -16,12 +16,16 @@ import {
   distributionSymbolText,
   DISTRIBUTION_FAMILIES,
 } from './distributionParams.js';
+import { t } from './i18n.js';
 
 const EVAL_TIMEOUT_MS = 15000;
 
 // Resolved relative to this module's own file, so it works regardless of what path the
 // app is served from (no bundler-injected BASE_URL here, unlike the React version).
 const WORKER_URL = new URL('../../public/giac-worker.js', import.meta.url);
+// "?giaclog" on the page's own URL is handed on to the worker, which only then prints Giac's
+// running commentary to the console (see public/giac-worker.js).
+if (new URLSearchParams(window.location.search).has('giaclog')) WORKER_URL.searchParams.set('giaclog', '1');
 
 let worker = null;
 let readyPromise = null;
@@ -60,7 +64,7 @@ function spawnWorker() {
     }
   };
   w.onerror = (e) => {
-    if (readyReject) readyReject(new Error(e.message || 'Failed to load the Xcas engine.'));
+    if (readyReject) readyReject(new Error(e.message || t('Failed to load the Xcas engine.')));
   };
 }
 
@@ -102,7 +106,7 @@ function cancelAll(message) {
 
 // Aborts whatever is currently being evaluated (if anything) and recovers the engine.
 export function cancelCurrentEval() {
-  cancelAll('Cancelled.');
+  cancelAll(t('Cancelled.'));
 }
 
 function postEval(expr) {
@@ -110,7 +114,7 @@ function postEval(expr) {
     const id = nextId++;
     const timer = setTimeout(() => {
       if (pending.has(id)) {
-        cancelAll('This expression took too long to evaluate and was cancelled.');
+        cancelAll(t('This expression took too long to evaluate and was cancelled.'));
       }
     }, EVAL_TIMEOUT_MS);
     pending.set(id, { resolve, timer });
@@ -1455,7 +1459,7 @@ function formatSolveResult(raw, varNames) {
   const certificateTuples = varNames && parseCertificateOfExistence(raw, varNames);
   if (certificateTuples) {
     const clause = labelSolveTuples(certificateTuples, varNames)[0];
-    const note = 'found numerically — more solutions may exist';
+    const note = t('found numerically — more solutions may exist');
     return {
       text: `${clause.text} (${note})`,
       latex: clause.latex != null ? `${clause.latex}\\quad(\\text{${note}})` : null,
@@ -1754,7 +1758,7 @@ async function evaluateRegression(name, xExpr, yExpr) {
   const ys = parseNumberList(outY);
   const errorResult = (text) => ({ raw: 'GIAC_ERROR ' + text, isError: true, text, latex: null, isGraphics: false });
   if (!xs || !ys) {
-    return errorResult(`${name} expects two lists of numbers, e.g. ${name}([1,2,3],[0,1,0]).`);
+    return errorResult(t('{name} expects two lists of numbers, e.g. {name}([1,2,3],[0,1,0]).', { name }));
   }
 
   let formula;
@@ -2703,8 +2707,8 @@ async function evaluateAsymptote(asymptoteCall) {
     return {
       raw: null,
       isError: false,
-      text: 'Keine schiefe Asymptote',
-      latex: '\\text{Keine schiefe Asymptote}',
+      text: t('No oblique asymptote'),
+      latex: `\\text{${t('No oblique asymptote')}}`,
       isGraphics: false,
     };
   }
@@ -2787,7 +2791,7 @@ export async function evaluate(expr, definitions) {
       return {
         raw: out,
         isError: false,
-        text: 'Graphics output (plot/draw) is not rendered in this interface yet.',
+        text: t('Graphics output (plot/draw) is not rendered in this interface yet.'),
         latex: null,
         isGraphics: true,
       };
@@ -3146,7 +3150,7 @@ export async function evaluateApprox(expr, definitions) {
       return {
         raw: out,
         isError: false,
-        text: 'Graphics output (plot/draw) is not rendered in this interface yet.',
+        text: t('Graphics output (plot/draw) is not rendered in this interface yet.'),
         latex: null,
         isGraphics: true,
       };

@@ -52,6 +52,7 @@ import { XCAS_COMMANDS } from './lib/xcasCommands.js';
 import { findDistributionMenu } from './lib/distributionParams.js';
 import { isRegressionMenuCommand } from './lib/regressionParams.js';
 import { isSysSolveMenuCommand } from './lib/sysSolveParams.js';
+import { t } from './lib/i18n.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -255,7 +256,7 @@ const TOOLBAR_GROUPS = [
       { label: '↓', nav: 'down' },
       { label: '→', nav: 'right' },
       { label: '⌫', nav: 'backspace', span2: true },
-      { label: '⏎', nav: 'newline', span2: true, title: 'New line - same as Shift+Enter' },
+      { label: '⏎', nav: 'newline', span2: true, title: t('New line - same as Shift+Enter') },
     ],
   },
 ];
@@ -368,15 +369,15 @@ export function mountApp(root) {
 
   // ---------- static structure ----------
 
-  const title = h('h1', null, 'Calculator');
-  const printBtn = h('button', { type: 'button', class: 'header__plotBtn', onclick: () => window.print() }, 'Print');
-  const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, 'Plot');
+  const title = h('h1', null, t('Calculator'));
+  const printBtn = h('button', { type: 'button', class: 'header__plotBtn', onclick: () => window.print() }, t('Print'));
+  const plotBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+P', onclick: () => (state.plotOpen ? closePlot() : openPlot()) }, t('Plot'));
   const plot3dBtn = h(
     'button',
     { type: 'button', class: 'header__plotBtn', title: 'Alt+3', onclick: () => (state.plot3dOpen ? closePlot3d() : openPlot3d()) },
-    '3D Plot',
+    t('3D Plot'),
   );
-  const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, 'Table');
+  const tableBtn = h('button', { type: 'button', class: 'header__plotBtn', title: 'Alt+T', onclick: () => (state.tableOpen ? closeTable() : openTable()) }, t('Table'));
   const functionsMenu = FunctionsMenu({ onInsert: handleFunctionsMenuInsert });
   const distributionMenu = DistributionMenu({
     onSubmit: (expr) => {
@@ -451,8 +452,8 @@ export function mountApp(root) {
     'div',
     { class: 'empty-hint' },
     h('div', { class: 'loading-bar' }, h('div', { class: 'loading-bar__fill' })),
-    h('p', null, 'Downloading and starting the Xcas computer algebra engine…'),
-    h('p', { class: 'empty-hint__small' }, "First load pulls ~18MB of WebAssembly; it's cached by the browser afterwards."),
+    h('p', null, t('Downloading and starting the Xcas computer algebra engine…')),
+    h('p', { class: 'empty-hint__small' }, t("First load pulls ~18MB of WebAssembly; it's cached by the browser afterwards.")),
   );
   const errorHint = h('div', { class: 'empty-hint empty-hint--error' });
 
@@ -463,13 +464,13 @@ export function mountApp(root) {
   const input = h('textarea', {
     class: 'input-row__field',
     rows: 1,
-    placeholder: 'Waiting for engine…',
+    placeholder: t('Waiting for engine…'),
     autocomplete: 'off',
     autocorrect: 'off',
     spellcheck: false,
   });
   const submitBtn = h('button', { type: 'button', class: 'input-row__submit', onclick: () => submit({}) }, '=');
-  const stopBtn = h('button', { type: 'button', class: 'input-row__submit input-row__submit--stop', onclick: () => cancelCurrentEval() }, 'Stop');
+  const stopBtn = h('button', { type: 'button', class: 'input-row__submit input-row__submit--stop', onclick: () => cancelCurrentEval() }, t('Stop'));
   stopBtn.style.display = 'none';
 
   // Floats directly under the input, overlapping the toolbar below it rather than pushing
@@ -540,18 +541,18 @@ export function mountApp(root) {
   const hintBar = h(
     'footer',
     { class: 'hint-bar' },
-    h('span', null, '↑ / ↓ select an output or input'),
-    h('span', null, 'Enter/Tab insert selection at cursor'),
-    h('span', null, 'Function names suggest as you type - Tab picks a candidate, then ←/→/Tab cycle, Enter or click confirms, Esc dismisses'),
-    h('span', null, 'Enter evaluate (no selection)'),
-    h('span', null, 'Shift+Enter new line - one equation per line solves as a system'),
-    h('span', null, 'Ctrl+Enter evaluate numerically'),
-    h('span', null, 'Enter on empty input repeats the last one'),
-    h('span', null, 'Esc clear selection (or return to input from plot/table)'),
-    h('span', null, 'Backspace on a selected entry deletes it'),
-    h('span', null, 'p on a selected input/output sends it to the plot panel, if plottable'),
-    h('span', null, 's on a selected input/output saves it, if saveable'),
-    h('span', null, 'Alt+P plot · Alt+T table'),
+    h('span', null, t('↑ / ↓ select an output or input')),
+    h('span', null, t('Enter/Tab insert selection at cursor')),
+    h('span', null, t('Function names suggest as you type - Tab picks a candidate, then ←/→/Tab cycle, Enter or click confirms, Esc dismisses')),
+    h('span', null, t('Enter evaluate (no selection)')),
+    h('span', null, t('Shift+Enter new line - one equation per line solves as a system')),
+    h('span', null, t('Ctrl+Enter evaluate numerically')),
+    h('span', null, t('Enter on empty input repeats the last one')),
+    h('span', null, t('Esc clear selection (or return to input from plot/table)')),
+    h('span', null, t('Backspace on a selected entry deletes it')),
+    h('span', null, t('p on a selected input/output sends it to the plot panel, if plottable')),
+    h('span', null, t('s on a selected input/output saves it, if saveable')),
+    h('span', null, t('Alt+P plot · Alt+T table')),
   );
   const hintsToggle = h(
     'button',
@@ -580,7 +581,7 @@ export function mountApp(root) {
   function setToolbarVisible(visible) {
     state.toolbarVisible = visible;
     toolbar.style.display = visible ? '' : 'none';
-    toolbarToggle.textContent = visible ? 'Hide math keyboard ▲' : 'Show math keyboard ▼';
+    toolbarToggle.textContent = visible ? t('Hide math keyboard ▲') : t('Show math keyboard ▼');
     // inputmode="none" tells mobile browsers this field manages its own on-screen input, so
     // they suppress the OS virtual keyboard - without it, focusing/tapping the field to use the
     // math keyboard also pops the OS keyboard up over it. Only relevant while the math keyboard
@@ -596,7 +597,7 @@ export function mountApp(root) {
   function setHintsVisible(visible) {
     state.hintsVisible = visible;
     hintBar.style.display = visible ? '' : 'none';
-    hintsToggle.textContent = visible ? 'Hide keyboard hints ▲' : 'Show keyboard hints ▼';
+    hintsToggle.textContent = visible ? t('Hide keyboard hints ▲') : t('Show keyboard hints ▼');
     try {
       localStorage.setItem('hintsVisible', visible ? '1' : '0');
     } catch {
@@ -608,10 +609,10 @@ export function mountApp(root) {
 
   const calcColumn = h('div', { class: 'layout__calc' }, appColumn);
 
-  const tabCalc = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('calculator') }, 'Calculator');
-  const tabPlot = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot') }, 'Plot');
-  const tabPlot3d = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot3d') }, '3D Plot');
-  const tabTable = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('table') }, 'Table');
+  const tabCalc = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('calculator') }, t('Calculator'));
+  const tabPlot = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot') }, t('Plot'));
+  const tabPlot3d = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('plot3d') }, t('3D Plot'));
+  const tabTable = h('button', { type: 'button', class: 'layout__tab', onclick: () => setMobileView('table') }, t('Table'));
   const tabsBar = h('div', { class: 'layout__tabs' }, tabCalc, tabPlot, tabPlot3d, tabTable);
   tabsBar.style.display = 'none';
 
@@ -659,10 +660,10 @@ export function mountApp(root) {
     const engineReady = state.status === 'ready';
     statusPill.className = `status-pill status-pill--${state.busy ? 'busy' : state.status}`;
     statusPill.textContent =
-      state.status === 'loading' ? 'Loading engine…' : state.status === 'ready' ? (state.busy ? 'Evaluating…' : 'Ready') : state.status === 'error' ? 'Failed to load' : '';
+      state.status === 'loading' ? t('Loading engine…') : state.status === 'ready' ? (state.busy ? t('Evaluating…') : t('Ready')) : state.status === 'error' ? t('Failed to load') : '';
 
     input.disabled = !engineReady;
-    input.placeholder = state.status === 'ready' ? 'Enter an expression…' : 'Waiting for engine…';
+    input.placeholder = state.status === 'ready' ? t('Enter an expression…') : t('Waiting for engine…');
     submitBtn.disabled = !engineReady;
     submitBtn.style.display = state.busy ? 'none' : '';
     stopBtn.style.display = state.busy ? '' : 'none';
@@ -708,12 +709,13 @@ export function mountApp(root) {
 
   if (emptyHint.children.length === 0) {
     emptyHint.append(
-      h('p', null, 'Type an expression and press Enter. Examples:'),
+      h('p', null, t('Type an expression and press Enter. Examples:')),
       h(
         'ul',
         null,
         EXAMPLES.map((expr) => h('li', { onclick: () => selectExample(expr) }, expr)),
       ),
+      h('p', { class: 'empty-hint__small empty-hint__privacy' }, t('Everything runs locally in your browser - no data is uploaded.')),
     );
   }
 
@@ -979,7 +981,7 @@ export function mountApp(root) {
         typesetNode(previewSpan);
       } else {
         previewWrap.className = 'formula-preview formula-preview--empty';
-        previewSpan.textContent = 'Formula preview';
+        previewSpan.textContent = t('Formula preview');
       }
     }, 60);
   }
@@ -1045,14 +1047,14 @@ export function mountApp(root) {
   function renderCompletions() {
     clear(completionsBar);
     completionsBar.append(
-      h('span', { class: 'completions-bar__count' }, `${completionMatches.length} match${completionMatches.length === 1 ? '' : 'es'}:`),
+      h('span', { class: 'completions-bar__count' }, t(completionMatches.length === 1 ? '{count} match:' : '{count} matches:', { count: completionMatches.length })),
     );
     completionMatches.forEach((name, idx) => {
       const item = h(
         'span',
         {
           class: `completions-bar__item${idx === completionIndex ? ' completions-bar__item--selected' : ''}`,
-          title: XCAS_COMMANDS[name] || '',
+          title: t(XCAS_COMMANDS[name] || ''),
           tabindex: -1,
           onmousedown: (e) => {
             e.preventDefault();
@@ -1187,21 +1189,21 @@ export function mountApp(root) {
       giacSetPauMode(state.pauMode);
       document.documentElement.classList.toggle('pau-mode', state.pauMode);
       if (state.pauMode) playBarrelRoll();
-      finishModeCommandEntry(displayInput, expr, state.pauMode ? 'pau mode enabled' : 'pau mode disabled', state.pauMode ? 'https://xkcd.com/1292/' : null);
+      finishModeCommandEntry(displayInput, expr, state.pauMode ? t('pau mode enabled') : t('pau mode disabled'), state.pauMode ? 'https://xkcd.com/1292/' : null);
       return;
     }
     if (/^pimode$/i.test(expr.trim())) {
       handleTauModeChange(false);
-      finishModeCommandEntry(displayInput, expr, 'pi mode enabled');
+      finishModeCommandEntry(displayInput, expr, t('pi mode enabled'));
       return;
     }
     if (/^taumode$/i.test(expr.trim())) {
       handleTauModeChange(true);
-      finishModeCommandEntry(displayInput, expr, 'tau mode enabled');
+      finishModeCommandEntry(displayInput, expr, t('tau mode enabled'));
       return;
     }
     if (!force && looksIncomplete(expr)) {
-      state.warning = 'This expression looks unfinished (dangling operator or unmatched parenthesis) - evaluating it can take a very long time. Press Enter to run it anyway.';
+      state.warning = t('This expression looks unfinished (dangling operator or unmatched parenthesis) - evaluating it can take a very long time. Press Enter to run it anyway.');
       renderWarning();
       return;
     }
@@ -1890,6 +1892,7 @@ export function mountApp(root) {
   function mountTablePanel() {
     tablePanelInstance = TablePanel({
       columns: state.tableColumns,
+      evaluateRaw: giacEvaluateRaw,
       onColumnsChange: (cols) => {
         state.tableColumns = cols;
         schedulePersist();
@@ -1912,10 +1915,10 @@ export function mountApp(root) {
   // evaluate-and-fold-into-definitions path submit() uses for the main input line, so a
   // table column shows up everywhere a calculator-typed variable would.
   async function assignTableColumn(expr) {
-    if (state.status !== 'ready') return { ok: false, message: 'Engine not ready.' };
+    if (state.status !== 'ready') return { ok: false, message: t('Engine not ready.') };
     const out = await giacEvaluateRaw(expr);
     if (out.startsWith('GIAC_ERROR')) {
-      return { ok: false, message: out.slice(11).trim() || 'Could not evaluate this column.' };
+      return { ok: false, message: out.slice(11).trim() || t('Could not evaluate this column.') };
     }
     setDefinitions(applyEntryToDefinitions(state.definitions, expr, { isError: false }));
     return { ok: true, message: null };
@@ -2072,10 +2075,10 @@ export function mountApp(root) {
     try {
       snapshot = parseSessionFileText(await file.text());
     } catch (err) {
-      window.alert(`Couldn't load that session file: ${err.message || err}`);
+      window.alert(t("Couldn't load that session file: {message}", { message: err.message || err }));
       return;
     }
-    if (!window.confirm('Loading this file replaces your current session. Continue?')) return;
+    if (!window.confirm(t('Loading this file replaces your current session. Continue?'))) return;
     flushPersist();
     clearSessionState();
     input.disabled = true;
@@ -2086,7 +2089,7 @@ export function mountApp(root) {
   }
 
   function handleClearSession() {
-    if (!window.confirm("Clear the current session? This can't be undone.")) return;
+    if (!window.confirm(t("Clear the current session? This can't be undone."))) return;
     clearSessionState();
     remountOpenPanels();
     clearSnapshotFromLocalStorage();

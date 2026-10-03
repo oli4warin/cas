@@ -1,4 +1,5 @@
 import { h } from '../lib/dom.js';
+import { t } from '../lib/i18n.js';
 
 // Popover with the CAS session settings that affect every evaluation (calculator input
 // and plots alike, since they all share the one Giac session) - angle unit, whether
@@ -16,7 +17,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
   let disabled = false;
 
   const root = h('div', { class: 'settings-menu' });
-  const trigger = h('button', { type: 'button', class: 'settings-menu__trigger', title: 'Settings', onclick: toggle }, '⚙');
+  const trigger = h('button', { type: 'button', class: 'settings-menu__trigger', title: t('Settings'), onclick: toggle }, '⚙');
 
   const radBtn = h('button', { type: 'button', onclick: () => onAngleModeChange('RAD') }, 'RAD');
   const degBtn = h('button', { type: 'button', onclick: () => onAngleModeChange('DEG') }, 'DEG');
@@ -45,7 +46,7 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
       type: 'button',
       class: 'theme-switch',
       role: 'switch',
-      'aria-label': 'Toggle light theme',
+      'aria-label': t('Toggle light theme'),
       onclick: () => onThemeChange(theme === 'light' ? 'dark' : 'light'),
     },
     themeThumb,
@@ -57,43 +58,43 @@ export function SettingsMenu({ onAngleModeChange, onApproxChange, onAutosimplify
     h(
       'div',
       { class: 'settings-menu__row' },
-      h('span', { class: 'settings-menu__label' }, 'Angle'),
+      h('span', { class: 'settings-menu__label' }, t('Angle')),
       h('div', { class: 'settings-menu__segmented' }, radBtn, degBtn),
     ),
     h(
       'label',
       { class: 'settings-menu__row settings-menu__row--checkbox' },
-      h('span', { class: 'settings-menu__label' }, 'Approximate'),
+      h('span', { class: 'settings-menu__label' }, t('Approximate')),
       approxInput,
     ),
     h(
       'div',
       { class: 'settings-menu__row' },
-      h('span', { class: 'settings-menu__label', title: '0 = none, 1 = regroup, 2 = simplify' }, 'Autosimplify'),
+      h('span', { class: 'settings-menu__label', title: t('0 = none, 1 = regroup, 2 = simplify') }, t('Autosimplify')),
       h('div', { class: 'settings-menu__segmented' }, ...autosimplifyBtns),
     ),
     h(
       'div',
       { class: 'settings-menu__row' },
-      h('span', { class: 'settings-menu__label', title: 'Express results containing pi using tau (= 2*pi) instead' }, 'π / τ'),
+      h('span', { class: 'settings-menu__label', title: t('Express results containing pi using tau (= 2*pi) instead') }, 'π / τ'),
       h('div', { class: 'settings-menu__segmented' }, piBtn, tauBtn),
     ),
     h(
       'label',
       { class: 'settings-menu__row settings-menu__row--checkbox' },
-      h('span', { class: 'settings-menu__label' }, 'Show text output'),
+      h('span', { class: 'settings-menu__label' }, t('Show text output')),
       showTextInput,
     ),
     h(
       'label',
       { class: 'settings-menu__row' },
-      h('span', { class: 'settings-menu__label', title: 'Significant digits shown for an approximate numeric result - the full value is still used when copied' }, 'Digits'),
+      h('span', { class: 'settings-menu__label', title: t('Significant digits shown for an approximate numeric result - the full value is still used when copied') }, t('Digits')),
       digitsInput,
     ),
     h(
       'div',
       { class: 'settings-menu__row' },
-      h('span', { class: 'settings-menu__label' }, 'Theme'),
+      h('span', { class: 'settings-menu__label' }, t('Theme')),
       themeSwitch,
     ),
   );

@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Least-squares curve fits for the "regression" command's non-sinusoidal curve types (see
 // sinRegression.js for the sinusoidal fit, which needs its own nonlinear frequency search).
 // Every fit here reduces to ordinary linear least squares: fitPolynomial solves it directly
@@ -36,7 +37,7 @@ function solveLinear(A, b) {
 // to determine a degree-`degree` curve.
 export function fitPolynomial(xsIn, ysIn, degree) {
   const pts = cleanPoints(xsIn, ysIn);
-  if (pts.length < degree + 1) throw new Error(`Need at least ${degree + 1} numeric (x,y) points for a degree-${degree} fit.`);
+  if (pts.length < degree + 1) throw new Error(t('Need at least {count} numeric (x,y) points for a degree-{degree} fit.', { count: degree + 1, degree }));
   const n = pts.length;
   const powers = pts.map((p) => {
     const row = [1];
@@ -58,7 +59,7 @@ export function fitPolynomial(xsIn, ysIn, degree) {
     b.push(sb);
   }
   const sol = solveLinear(A, b);
-  if (!sol) throw new Error('Could not fit a curve to this data - the x-values may not vary enough.');
+  if (!sol) throw new Error(t('Could not fit a curve to this data - the x-values may not vary enough.'));
   return sol;
 }
 
@@ -66,8 +67,8 @@ export function fitPolynomial(xsIn, ysIn, degree) {
 // strictly positive - inherent to the power-law model itself, not an implementation limit.
 export function fitPower(xsIn, ysIn) {
   const pts = cleanPoints(xsIn, ysIn);
-  if (pts.length < 2) throw new Error('Need at least 2 numeric (x,y) points for a power fit.');
-  if (pts.some((p) => !(p.x > 0) || !(p.y > 0))) throw new Error('Power regression requires every x and y value to be positive.');
+  if (pts.length < 2) throw new Error(t('Need at least 2 numeric (x,y) points for a power fit.'));
+  if (pts.some((p) => !(p.x > 0) || !(p.y > 0))) throw new Error(t('Power regression requires every x and y value to be positive.'));
   const [c0, c1] = fitPolynomial(
     pts.map((p) => Math.log(p.x)),
     pts.map((p) => Math.log(p.y)),
@@ -79,8 +80,8 @@ export function fitPower(xsIn, ysIn) {
 // Fits y = a*e^(b*x) by linear least squares on (x, ln y). Requires every y to be positive.
 export function fitExponential(xsIn, ysIn) {
   const pts = cleanPoints(xsIn, ysIn);
-  if (pts.length < 2) throw new Error('Need at least 2 numeric (x,y) points for an exponential fit.');
-  if (pts.some((p) => !(p.y > 0))) throw new Error('Exponential regression requires every y value to be positive.');
+  if (pts.length < 2) throw new Error(t('Need at least 2 numeric (x,y) points for an exponential fit.'));
+  if (pts.some((p) => !(p.y > 0))) throw new Error(t('Exponential regression requires every y value to be positive.'));
   const [c0, c1] = fitPolynomial(
     pts.map((p) => p.x),
     pts.map((p) => Math.log(p.y)),
@@ -92,8 +93,8 @@ export function fitExponential(xsIn, ysIn) {
 // Fits y = a*ln(x) + b by linear least squares on (ln x, y). Requires every x to be positive.
 export function fitLogarithmic(xsIn, ysIn) {
   const pts = cleanPoints(xsIn, ysIn);
-  if (pts.length < 2) throw new Error('Need at least 2 numeric (x,y) points for a logarithmic fit.');
-  if (pts.some((p) => !(p.x > 0))) throw new Error('Logarithmic regression requires every x value to be positive.');
+  if (pts.length < 2) throw new Error(t('Need at least 2 numeric (x,y) points for a logarithmic fit.'));
+  if (pts.some((p) => !(p.x > 0))) throw new Error(t('Logarithmic regression requires every x value to be positive.'));
   const [c0, c1] = fitPolynomial(
     pts.map((p) => Math.log(p.x)),
     pts.map((p) => p.y),
@@ -114,13 +115,13 @@ const LOGISTIC_MAX_ITERATIONS = 200;
 // refinement - the standard approach here, since no closed-form fit exists.
 export function fitLogistic(xsIn, ysIn) {
   const pts = cleanPoints(xsIn, ysIn);
-  if (pts.length < 4) throw new Error('Need at least 4 numeric (x,y) points to fit a logistic curve.');
-  if (pts.some((p) => !(p.y > 0))) throw new Error('Logistic regression requires every y value to be positive.');
+  if (pts.length < 4) throw new Error(t('Need at least 4 numeric (x,y) points to fit a logistic curve.'));
+  if (pts.some((p) => !(p.y > 0))) throw new Error(t('Logistic regression requires every y value to be positive.'));
   const maxY = Math.max(...pts.map((p) => p.y));
 
   let c = maxY * 1.05;
   const sub = pts.filter((p) => p.y < c);
-  if (sub.length < 2) throw new Error('Could not estimate a starting logistic fit from this data.');
+  if (sub.length < 2) throw new Error(t('Could not estimate a starting logistic fit from this data.'));
   const [lnA, negB] = fitPolynomial(
     sub.map((p) => p.x),
     sub.map((p) => Math.log(c / p.y - 1)),
