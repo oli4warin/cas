@@ -32,7 +32,9 @@ export const DE = {
   'p on a selected input/output sends it to the plot panel, if plottable':
     'p schickt die ausgewählte Ein-/Ausgabe an den Plot, falls darstellbar',
   's on a selected input/output saves it, if saveable': 's speichert die ausgewählte Ein-/Ausgabe, falls speicherbar',
-  'Alt+P plot · Alt+T table': 'Alt+P Plot · Alt+T Tabelle',
+  'Alt+P plot · Alt+3 3D plot · Alt+T table · Alt+V variables': 'Alt+P Plot · Alt+3 3D-Plot · Alt+T Tabelle · Alt+V Variablen',
+  'Ctrl+S save session to file · Ctrl+O open session file · Ctrl+P print · Alt+C clear session':
+    'Ctrl+S Sitzung in Datei speichern · Ctrl+O Sitzungsdatei öffnen · Ctrl+P drucken · Alt+C Sitzung löschen',
   'Hide math keyboard ▲': 'Mathe-Tastatur ausblenden ▲',
   'Show math keyboard ▼': 'Mathe-Tastatur einblenden ▼',
   'Hide keyboard hints ▲': 'Tastaturhinweise ausblenden ▲',

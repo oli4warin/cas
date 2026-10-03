@@ -556,7 +556,8 @@ export function mountApp(root) {
     h('span', null, t('Backspace on a selected entry deletes it')),
     h('span', null, t('p on a selected input/output sends it to the plot panel, if plottable')),
     h('span', null, t('s on a selected input/output saves it, if saveable')),
-    h('span', null, t('Alt+P plot · Alt+T table')),
+    h('span', null, t('Alt+P plot · Alt+3 3D plot · Alt+T table · Alt+V variables')),
+    h('span', null, t('Ctrl+S save session to file · Ctrl+O open session file · Ctrl+P print · Alt+C clear session')),
   );
   const hintsToggle = h(
     'button',
@@ -1543,7 +1544,7 @@ export function mountApp(root) {
   input.addEventListener('blur', hideCompletions);
 
   // Alt+P/Alt+3/Alt+T toggle the plot, 3D plot and table panels from anywhere, including while
-  // the expression input is focused. Esc also jumps back to the expression input from a
+  // the expression input is focused (Alt+V and Alt+C: the variables menu, clear session). Esc also jumps back to the expression input from a
   // plot/table field - the input's own keydown handler already owns Esc for itself, so
   // this only fires when focus is actually inside one of the side panels (both plot panels
   // share the ".plot-panel" class - see components/plot3dPanel.js - so this one selector
@@ -1571,6 +1572,26 @@ export function mountApp(root) {
         variablesMenu.toggle();
         return;
       }
+      // Same guard as the session menu's own trigger (see renderStatus), and the same
+      // confirmation prompt as its "clear" item.
+      if (key === 'c') {
+        e.preventDefault();
+        if (state.status === 'ready' && !state.busy) handleClearSession();
+        return;
+      }
+    }
+    // Takes over the browser's own "save page as" (which would only save the app's HTML, not
+    // the session) for the session menu's "save to file" - same guard as that menu's trigger.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      if (state.status === 'ready' && !state.busy) handleSaveSessionToFile();
+      return;
+    }
+    // Likewise the browser's own "open file", for the session menu's "load from file".
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      if (state.status === 'ready' && !state.busy) sessionMenu.openFilePicker();
+      return;
     }
     // The browser's own print would leave the plots/table out - see printSession.
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {

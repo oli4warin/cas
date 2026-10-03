@@ -113,5 +113,10 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onPrint, onClear }) {
     printBtn.disabled = disabled;
   }
 
-  return { root, setDisabled, setPrintDisabled };
+  // Opens the same OS file picker "Load from file…" does, for app.js's Ctrl+O shortcut.
+  function openFilePicker() {
+    fileInput.click();
+  }
+
+  return { root, setDisabled, setPrintDisabled, openFilePicker };
 }
