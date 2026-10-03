@@ -337,7 +337,9 @@ export function normalizeSolveqCalls(expr) {
 // below) gets that variable appended, making domain(sqrt(t)) behave like domain(sqrt(t),t).
 // Zero or several free variables is ambiguous and left untouched for Giac's own "x" default,
 // as is a call that already names its variable. Same scanning skeleton as normalizeSolveqCalls
-// above, so it also works nested inside a larger expression.
+// above, so it also works nested inside a larger expression. The app's own asymptote() command
+// (see parseAsymptoteCall) gets the same treatment, so asymptote(t^2/(t+1)) works like
+// asymptote(t^2/(t+1),t).
 export function normalizeDomainCalls(expr, definitions = new Map()) {
   let out = '';
   let i = 0;
@@ -347,7 +349,7 @@ export function normalizeDomainCalls(expr, definitions = new Map()) {
       IDENT_RE.lastIndex = i;
       const name = IDENT_RE.exec(expr)[0];
       let j = i + name.length;
-      if (name === 'domain' && expr[j] === '(') {
+      if ((name === 'domain' || name === 'asymptote') && expr[j] === '(') {
         const close = findMatchingParen(expr, j);
         if (close !== -1) {
           const args = splitTopLevel(expr.slice(j + 1, close), ',').map((a) => normalizeDomainCalls(a.trim(), definitions));
@@ -355,7 +357,7 @@ export function normalizeDomainCalls(expr, definitions = new Map()) {
             const freeVars = collectFreeVariables(expandKnownFunctionCalls(args[0], definitions), definitions);
             if (freeVars.length === 1) args.push(freeVars[0]);
           }
-          out += `domain(${args.join(',')})`;
+          out += `${name}(${args.join(',')})`;
           i = close + 1;
           continue;
         }
@@ -2688,7 +2690,9 @@ async function evaluateDomain(domainCall, sentExpr) {
 // Recognizes a top-level asymptote(expr,var) call - a command this app adds itself (Giac has
 // no native "asymptote" - typing it at the engine just echoes the call back unevaluated,
 // confirmed against the real engine) - and returns its expression/variable text, or null if
-// `sentExpr` isn't shaped like one. Mirrors parseDomainCall above.
+// `sentExpr` isn't shaped like one. Mirrors parseDomainCall above. A one-argument call that
+// normalizeDomainCalls couldn't pick a variable for (zero or several free variables) falls
+// back to "x", same as Giac's own domain() default.
 function parseAsymptoteCall(sentExpr) {
   const s = sentExpr.trim();
   const body = s.endsWith(';') ? s.slice(0, -1) : s;
@@ -2696,6 +2700,7 @@ function parseAsymptoteCall(sentExpr) {
   const openIdx = body.indexOf('(');
   if (findMatchingParen(body, openIdx) !== body.length - 1) return null;
   const args = splitTopLevel(body.slice(openIdx + 1, -1), ',').map((a) => a.trim());
+  if (args.length === 1 && args[0]) args.push('x');
   if (args.length !== 2 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(args[1])) return null;
   return { expr: args[0], varName: args[1] };
 }
