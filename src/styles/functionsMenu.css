@@ -3,15 +3,17 @@
 }
 
 .functions-menu__trigger {
-  width: 32px;
   height: 32px;
+  padding: 0 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text-h);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .functions-menu__trigger:hover:not(:disabled) {

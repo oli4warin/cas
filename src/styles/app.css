@@ -129,24 +129,100 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   margin-bottom: 16px;
 }
 
-.header__actions {
+.header__brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+}
+
+/* The controls sit in groups (side panels / math helpers / app), told apart by a hairline
+   between them rather than by spacing alone. Every control in here is the same 32px high. */
+.header__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+/* Each menu's dropdown is positioned against this whole row (its right edge) instead of
+   against its own trigger: the triggers aren't all at the far right any more, and on a narrow
+   or split layout the row wraps under the title - a panel hung off its own button could then
+   open partly off-screen. */
+.header__actions .functions-menu,
+.header__actions .variables-menu,
+.header__actions .session-menu,
+.header__actions .settings-menu {
+  position: static;
+}
+
+.header__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header__group + .header__group {
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+/* Narrow enough that the groups wrap onto several lines: a divider would end up dangling at
+   the start of a line, so spacing alone separates them there. */
+@media (max-width: 560px) {
+  .header__group + .header__group {
+    padding-left: 0;
+    border-left: none;
+  }
 }
 
 .header__plotBtn {
+  height: 32px;
   font-size: 13px;
   font-weight: 600;
-  padding: 6px 14px;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 0 12px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text-h);
   cursor: pointer;
+}
+
+/* The three panel toggles read as one segmented control: shared borders, rounded only at the
+   two ends, and no hover lift (which would tear a joined row apart). */
+.header__group--joined {
+  gap: 0;
+}
+
+.header__group--joined .header__plotBtn {
+  border-radius: 0;
+  margin-left: -1px;
+  position: relative;
+}
+
+.header__group--joined .header__plotBtn:first-child {
+  margin-left: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.header__group--joined .header__plotBtn:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.header__group--joined .header__plotBtn:hover:not(:disabled) {
+  transform: none;
+  z-index: 1;
+}
+
+.header__group--joined .header__plotBtn--active {
+  z-index: 2;
 }
 
 .header__plotBtn:hover:not(:disabled) {
@@ -171,6 +247,7 @@
 }
 
 .header h1 {
+  margin: 0;
   font-size: 22px;
   font-weight: 650;
   letter-spacing: -0.02em;
