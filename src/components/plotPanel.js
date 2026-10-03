@@ -23,6 +23,11 @@ import { t } from '../lib/i18n.js';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
 const SAMPLE_DEBOUNCE_MS = 150;
+// A differential equation's direction field: one arrow roughly every FIELD_ARROW_SPACING pixels
+// in each direction, each drawn FIELD_ARROW_LEN pixels long - short enough against that
+// spacing that even two arrows pointing straight at each other don't touch.
+const FIELD_ARROW_SPACING = 20;
+const FIELD_ARROW_LEN = 11;
 // Opacity for a distribution row's shaded area/bars (see the 'area'/'bars' curve styles in
 // draw() below) - low enough that the grid lines and curve stroke underneath/on top still
 // read clearly through the fill.
@@ -285,9 +290,9 @@ function draw(canvas, rawView, curves, aspectLocked) {
     if (curve.style === 'field') {
       ctx.strokeStyle = curve.color;
       ctx.fillStyle = curve.color;
-      ctx.lineWidth = 1.5;
-      const ARROW_LEN = 12;
-      const HEAD_LEN = 4;
+      ctx.lineWidth = 1.25;
+      const ARROW_LEN = FIELD_ARROW_LEN;
+      const HEAD_LEN = 3.5;
       for (const { x, y, dx, dy } of curve.points) {
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(dx) || !Number.isFinite(dy)) continue;
         if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
@@ -1239,10 +1244,11 @@ export function PlotPanel({
     const effView = aspectLocked ? equalAspectView(view, width, height) : view;
     const { xmin, xmax } = effView;
     const points = Math.max(120, Math.min(700, Math.round(width / 2)));
-    // Aiming for roughly one arrow per ~32px keeps the field dense enough to actually read
-    // as a flow, without so many arrows they blur into a solid smear.
-    const fieldNx = Math.max(10, Math.min(40, Math.round(width / 32)));
-    const fieldNy = Math.max(8, Math.min(30, Math.round(height / 32)));
+    // Aiming for roughly one arrow per ~20px: dense enough to read as a continuous flow, while
+    // still leaving a visible gap between neighbours (each arrow is drawn 11px long - see
+    // FIELD_ARROW_LEN) so they don't blur into a solid smear.
+    const fieldNx = Math.max(16, Math.min(64, Math.round(width / FIELD_ARROW_SPACING)));
+    const fieldNy = Math.max(12, Math.min(48, Math.round(height / FIELD_ARROW_SPACING)));
     // Denser than the vector field above - a system/complexSystem row's grid has to resolve
     // both a smooth implicit-curve contour (marching squares - see traceContourSegments in
     // lib/plotSystem.js) and an inequality's own region fill (buildRegionFillPolygons already
