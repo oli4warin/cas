@@ -65,6 +65,8 @@ export const XCAS_COMMANDS = {
   cot: 'cotangent',
 
   // Calculus
+  asymptote: 'calculates the asymptote',
+	domain: 'returns the domain of a function',
   diff: 'derivative',
   integrate: 'antiderivative / definite integral',
   limit: 'limit',
@@ -75,7 +77,6 @@ export const XCAS_COMMANDS = {
   fMax: 'function maximum',
   fMin: 'function minimum',
   desolve: 'solve a differential equation',
-  asymptote: 'calculates the asymptote',
 
   // Linear algebra
   det: 'determinant',
