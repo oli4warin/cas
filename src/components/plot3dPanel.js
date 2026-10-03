@@ -514,11 +514,14 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
     }
   }
 
-  function sceneLayout() {
+  // `forPrint` skips the theme's own --plot-* colors for the light defaults below - see
+  // getPrintImage.
+  function sceneLayout(forPrint = false) {
     const styles = getComputedStyle(root);
-    const gridColor = styles.getPropertyValue('--plot-grid').trim() || '#e2e0ea';
-    const axisColor = styles.getPropertyValue('--plot-axis').trim() || '#8a8698';
-    const textColor = styles.getPropertyValue('--plot-tick-text').trim() || '#8a8698';
+    const themed = (name) => (forPrint ? '' : styles.getPropertyValue(name).trim());
+    const gridColor = themed('--plot-grid') || '#e2e0ea';
+    const axisColor = themed('--plot-axis') || '#8a8698';
+    const textColor = themed('--plot-tick-text') || '#8a8698';
     const axis = (range) => ({
       range,
       gridcolor: gridColor,
@@ -682,6 +685,20 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
     },
     setConnectionStatus(status) {
       statusEl.style.display = status === false ? '' : 'none';
+    },
+    // The 3D sibling of PlotPanel's own getPrintImage (see there) - resolves to a PNG data
+    // URL, or null while nothing is drawn. Rendered by Plotly from the same traces in light
+    // colors, at the camera angle the scene is currently turned to.
+    async getPrintImage() {
+      if (!plotly || !plotInitialized) return null;
+      const allTraces = rows.flatMap((row, i) => tracesForRow(row, i, sampled[row.id]?.data));
+      if (!allTraces.some((trace) => trace.visible)) return null;
+      const layout = sceneLayout(true);
+      const camera = plotDiv.layout?.scene?.camera;
+      if (camera) layout.scene.camera = camera;
+      const width = plotDiv.clientWidth || 600;
+      const height = plotDiv.clientHeight || 400;
+      return plotly.toImage({ data: allTraces, layout }, { format: 'png', width, height, scale: 2 });
     },
     destroy,
   };

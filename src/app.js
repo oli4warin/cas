@@ -52,7 +52,7 @@ import { XCAS_COMMANDS } from './lib/xcasCommands.js';
 import { findDistributionMenu } from './lib/distributionParams.js';
 import { isRegressionMenuCommand } from './lib/regressionParams.js';
 import { isSysSolveMenuCommand } from './lib/sysSolveParams.js';
-import { t } from './lib/i18n.js';
+import { t, HTML_LANG } from './lib/i18n.js';
 
 function makeSessionId() {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -423,10 +423,16 @@ export function mountApp(root) {
   const sessionMenu = SessionMenu({
     onSaveToFile: handleSaveSessionToFile,
     onLoadFile: handleLoadSessionFile,
-    onPrint: () => window.print(),
+    onPrint: printSession,
     onClear: handleClearSession,
   });
   const statusPill = h('span', { class: 'status-pill' });
+  // Takes the status pill's place on the printed page (see the print stylesheet in app.css) -
+  // stamped on 'beforeprint' so the browser's own print menu gets it too, not just printSession.
+  const printDate = h('span', { class: 'print-date' });
+  window.addEventListener('beforeprint', () => {
+    printDate.textContent = new Date().toLocaleString(HTML_LANG, { dateStyle: 'medium', timeStyle: 'short' });
+  });
 
   // Left: what this is and whether it's ready. Right: the controls, grouped by what they act
   // on - the side panels (one joined toggle group), the math helpers (function list,
@@ -434,7 +440,7 @@ export function mountApp(root) {
   const header = h(
     'header',
     { class: 'header' },
-    h('div', { class: 'header__brand' }, title, statusPill),
+    h('div', { class: 'header__brand' }, title, statusPill, printDate),
     h(
       'div',
       { class: 'header__actions' },
@@ -550,7 +556,8 @@ export function mountApp(root) {
     h('span', null, t('Backspace on a selected entry deletes it')),
     h('span', null, t('p on a selected input/output sends it to the plot panel, if plottable')),
     h('span', null, t('s on a selected input/output saves it, if saveable')),
-    h('span', null, t('Alt+P plot · Alt+T table')),
+    h('span', null, t('Alt+P plot · Alt+3 3D plot · Alt+T table · Alt+V variables')),
+    h('span', null, t('Ctrl+S save session to file · Ctrl+O open session file · Ctrl+P print · Alt+C clear session')),
   );
   const hintsToggle = h(
     'button',
@@ -562,11 +569,15 @@ export function mountApp(root) {
   // common "just give me the input" state - leaves only a single slim row, not two.
   const togglesWrap = h('div', { class: 'bar-toggle-row' }, toolbarToggle, hintsToggle);
 
+  // Only ever filled for the duration of a print - see printSession.
+  const printExtras = h('div', { class: 'print-extras' });
+
   const appColumn = h(
     'div',
     { class: 'app' },
     header,
     historyList,
+    printExtras,
     previewWrap,
     inputRow,
     togglesWrap,
@@ -651,7 +662,7 @@ export function mountApp(root) {
     plotBtn.classList.toggle('header__plotBtn--active', state.plotOpen);
     plot3dBtn.classList.toggle('header__plotBtn--active', state.plot3dOpen);
     tableBtn.classList.toggle('header__plotBtn--active', state.tableOpen);
-    sessionMenu.setPrintDisabled(state.history.length === 0);
+    sessionMenu.setPrintDisabled(state.history.length === 0 && !split);
   }
 
   function renderStatus() {
@@ -1533,7 +1544,7 @@ export function mountApp(root) {
   input.addEventListener('blur', hideCompletions);
 
   // Alt+P/Alt+3/Alt+T toggle the plot, 3D plot and table panels from anywhere, including while
-  // the expression input is focused. Esc also jumps back to the expression input from a
+  // the expression input is focused (Alt+V and Alt+C: the variables menu, clear session). Esc also jumps back to the expression input from a
   // plot/table field - the input's own keydown handler already owns Esc for itself, so
   // this only fires when focus is actually inside one of the side panels (both plot panels
   // share the ".plot-panel" class - see components/plot3dPanel.js - so this one selector
@@ -1561,6 +1572,32 @@ export function mountApp(root) {
         variablesMenu.toggle();
         return;
       }
+      // Same guard as the session menu's own trigger (see renderStatus), and the same
+      // confirmation prompt as its "clear" item.
+      if (key === 'c') {
+        e.preventDefault();
+        if (state.status === 'ready' && !state.busy) handleClearSession();
+        return;
+      }
+    }
+    // Takes over the browser's own "save page as" (which would only save the app's HTML, not
+    // the session) for the session menu's "save to file" - same guard as that menu's trigger.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      if (state.status === 'ready' && !state.busy) handleSaveSessionToFile();
+      return;
+    }
+    // Likewise the browser's own "open file", for the session menu's "load from file".
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      if (state.status === 'ready' && !state.busy) sessionMenu.openFilePicker();
+      return;
+    }
+    // The browser's own print would leave the plots/table out - see printSession.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
+      e.preventDefault();
+      printSession();
+      return;
     }
     if (e.key === 'Escape' && document.activeElement?.closest('.plot-panel, .table-panel')) {
       e.preventDefault();
@@ -1960,6 +1997,44 @@ export function mountApp(root) {
     state.plot3dRows = [makeRow3d()];
     state.plot3dView = DEFAULT_VIEW_3D;
     renderLayout();
+  }
+
+  // ---------- printing ----------
+
+  // The live side panels are hidden on paper (see the print stylesheet in app.css) - what
+  // gets printed below the history instead is a static copy of each open one that actually
+  // has something in it: the plots as images, the table as a plain HTML table. Built right
+  // before the print dialog opens and thrown away again once it closes.
+  async function printSession() {
+    const figure = (caption, body) => h('figure', { class: 'print-extras__item' }, h('figcaption', null, caption), body);
+    const image = async (src) => {
+      const img = h('img', { class: 'print-extras__plot', src });
+      await img.decode().catch(() => {});
+      return img;
+    };
+    const items = [];
+    const plotImage = plotPanelInstance?.getPrintImage();
+    if (plotImage) items.push(figure(t('Plot'), await image(plotImage)));
+    const plot3dImage = await plot3dPanelInstance?.getPrintImage().catch(() => null);
+    if (plot3dImage) items.push(figure(t('3D Plot'), await image(plot3dImage)));
+    const table = tablePanelInstance?.getPrintData();
+    if (table) {
+      items.push(
+        figure(
+          t('Table'),
+          h(
+            'table',
+            { class: 'print-extras__table' },
+            h('thead', null, h('tr', null, ...table.names.map((name) => h('th', null, name)))),
+            h('tbody', null, ...table.rows.map((row) => h('tr', null, ...row.map((cell) => h('td', null, cell))))),
+          ),
+        ),
+      );
+    }
+    clear(printExtras);
+    printExtras.append(...items);
+    window.addEventListener('afterprint', () => clear(printExtras), { once: true });
+    window.print();
   }
 
   // ---------- session management ----------

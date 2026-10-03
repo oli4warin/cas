@@ -988,13 +988,57 @@
   color: #fff;
 }
 
-/* Printing (or "Save as PDF" from the print dialog) only makes sense for the history -
-   everything else here is an input control with no meaning on paper, so it's hidden and
-   the history is unclipped from its normal scrolling box to flow across pages instead. */
+/* Static copies of the open plots/table, filled in only while printing (see app.js's
+   printSession) - the live panels themselves stay hidden on paper. */
+.print-extras,
+.print-date {
+  display: none;
+}
+
+/* Printing (or "Save as PDF" from the print dialog) only makes sense for the history and
+   those copies - everything else here is an input control with no meaning on paper, so it's
+   hidden and the history is unclipped from its normal scrolling box to flow across pages
+   instead. */
 @media print {
+  .print-extras {
+    display: block;
+    color: #000;
+  }
+
+  .print-extras__item {
+    margin: 16px 0 0;
+    break-inside: avoid;
+  }
+
+  .print-extras__item figcaption {
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .print-extras__plot {
+    display: block;
+    max-width: 100%;
+    max-height: 60vh;
+    border: 1px solid #ccc;
+  }
+
+  .print-extras__table {
+    border-collapse: collapse;
+    font-family: var(--mono, monospace);
+    font-size: 12px;
+  }
+
+  .print-extras__table th,
+  .print-extras__table td {
+    border: 1px solid #999;
+    padding: 3px 10px;
+    text-align: right;
+  }
+
   .layout__tabs,
   .layout__side,
   .header__actions,
+  .status-pill,
   .toolbar,
   .bar-toggle-row,
   .formula-preview,
@@ -1031,6 +1075,12 @@
 
   .header h1 {
     color: #000;
+  }
+
+  .print-date {
+    display: inline;
+    color: #555;
+    font-size: 13px;
   }
 
   .history {
