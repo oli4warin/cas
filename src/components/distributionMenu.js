@@ -1,4 +1,5 @@
 import { h, clear } from '../lib/dom.js';
+import { t } from '../lib/i18n.js';
 
 const NEG_INFINITY_RE = /^-\s*infinity$/i;
 const NEG_INF_RE = /^-\s*inf$/i;
@@ -23,8 +24,8 @@ export function DistributionMenu({ onSubmit, onCancel }) {
 
   const title = h('h2', { class: 'distribution-menu__title' });
   const fieldsWrap = h('div', { class: 'distribution-menu__fields' });
-  const cancelBtn = h('button', { type: 'button', class: 'distribution-menu__btn distribution-menu__btn--ghost', onclick: cancel }, 'Cancel');
-  const submitBtn = h('button', { type: 'submit', class: 'distribution-menu__btn distribution-menu__btn--primary' }, 'Compute');
+  const cancelBtn = h('button', { type: 'button', class: 'distribution-menu__btn distribution-menu__btn--ghost', onclick: cancel }, t('Cancel'));
+  const submitBtn = h('button', { type: 'submit', class: 'distribution-menu__btn distribution-menu__btn--primary' }, t('Compute'));
   const form = h(
     'form',
     { class: 'distribution-menu__form', onsubmit: handleSubmit },
@@ -43,12 +44,12 @@ export function DistributionMenu({ onSubmit, onCancel }) {
 
   function buildFields(config) {
     clear(fieldsWrap);
-    fields = config.params.map((p) => ({ key: p.key, input: field(p.label, p.default != null ? { value: p.default } : undefined) }));
+    fields = config.params.map((p) => ({ key: p.key, input: field(t(p.label), p.default != null ? { value: p.default } : undefined) }));
     if (config.kind === 'cdf') {
-      fields.push({ key: '__lower', input: field('Lower bound', { value: config.lowerDefault }) });
-      fields.push({ key: '__upper', input: field('Upper bound') });
+      fields.push({ key: '__lower', input: field(t('Lower bound'), { value: config.lowerDefault }) });
+      fields.push({ key: '__upper', input: field(t('Upper bound')) });
     } else {
-      fields.push({ key: '__prob', input: field('Probability (p)') });
+      fields.push({ key: '__prob', input: field(t('Probability (p)')) });
     }
   }
 

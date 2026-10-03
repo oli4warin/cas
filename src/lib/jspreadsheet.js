@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Jspreadsheet CE (+ its jSuites dependency) powers the Table panel's grid (see
 // components/tablePanel.js) with Excel-like editing: multi-cell selection, copy/paste to and
 // from a real spreadsheet, drag-to-fill, resizable/draggable columns, undo/redo, and a
@@ -53,7 +54,7 @@ export function loadJspreadsheet() {
     // module comment above), so these await in sequence rather than via Promise.all.
     await loadScript(JSUITES_JS);
     await loadScript(JSPREADSHEET_JS);
-    if (!window.jspreadsheet) throw new Error('Could not load the spreadsheet library.');
+    if (!window.jspreadsheet) throw new Error(t('Could not load the spreadsheet library.'));
     return window.jspreadsheet;
   })();
   loadPromise.catch(() => {

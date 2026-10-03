@@ -1,4 +1,5 @@
 import { h } from '../lib/dom.js';
+import { t } from '../lib/i18n.js';
 
 // Popover with the session-management actions: exporting the current notebook (history plus
 // plot/3D-plot/table panel state - see lib/sessionPersistence.js) to a downloadable .json
@@ -12,8 +13,8 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
   const root = h('div', { class: 'session-menu' });
   const trigger = h(
     'button',
-    { type: 'button', class: 'session-menu__trigger', title: 'Session', onclick: toggle },
-    'Session',
+    { type: 'button', class: 'session-menu__trigger', title: t('Session'), onclick: toggle },
+    t('Session'),
   );
 
   const saveBtn = h(
@@ -26,7 +27,7 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
         onSaveToFile();
       },
     },
-    'Save to file…',
+    t('Save to file…'),
   );
 
   // The visible "Load from file…" control is this label wrapping a hidden native file input -
@@ -43,7 +44,7 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
       if (file) onLoadFile(file);
     },
   });
-  const loadBtn = h('label', { class: 'session-menu__item' }, 'Load from file…', fileInput);
+  const loadBtn = h('label', { class: 'session-menu__item' }, t('Load from file…'), fileInput);
 
   const clearBtn = h(
     'button',
@@ -55,13 +56,13 @@ export function SessionMenu({ onSaveToFile, onLoadFile, onClear }) {
         onClear();
       },
     },
-    'Clear session',
+    t('Clear session'),
   );
 
   const panel = h(
     'div',
     { class: 'session-menu__panel' },
-    h('div', { class: 'session-menu__title' }, 'Session'),
+    h('div', { class: 'session-menu__title' }, t('Session')),
     saveBtn,
     loadBtn,
     clearBtn,

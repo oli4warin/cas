@@ -4,6 +4,7 @@ import { loadPlotly } from '../lib/plotly.js';
 import { sampleSurface, sampleParametricSurface, sampleSystem3d } from '../lib/plotSample3d.js';
 import { DEFAULT_VIEW_3D, makeRow3d } from '../lib/plotRows3d.js';
 import { FormulaPreview } from './formulaPreview.js';
+import { t } from '../lib/i18n.js';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f59e0b', '#dc2626', '#16a34a', '#db2777'];
 const SAMPLE_DEBOUNCE_MS = 150;
@@ -66,19 +67,19 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onUVChange,
   const swatch = h('input', {
     type: 'color',
     class: 'plot-row__swatch',
-    title: 'Surface color',
+    title: t('Surface color'),
     onchange: (e) => onColorChange(e.target.value),
   });
   const modeSelect = h(
     'select',
-    { class: 'plot-row__modeSelect', title: 'Plot type', onchange: (e) => onModeChange(e.target.value) },
+    { class: 'plot-row__modeSelect', title: t('Plot type'), onchange: (e) => onModeChange(e.target.value) },
     h('option', { value: 'surface' }, 'z = f(x,y)'),
     h('option', { value: 'parametric' }, 'x(u,v), y(u,v), z(u,v)'),
-    h('option', { value: 'system' }, 'system of equations (x,y,z)'),
+    h('option', { value: 'system' }, t('system of equations (x,y,z)')),
   );
   const fieldsWrap = h('span');
   const toggleBtn = h('button', { type: 'button', class: 'plot-row__toggle', onclick: onToggle }, '●');
-  const removeBtn = h('button', { type: 'button', class: 'plot-row__remove', title: 'Remove', onclick: onRemove }, '×');
+  const removeBtn = h('button', { type: 'button', class: 'plot-row__remove', title: t('Remove'), onclick: onRemove }, '×');
   const errorSpan = h('span', { class: 'plot-row__error' });
   errorSpan.style.display = 'none';
 
@@ -110,7 +111,7 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onUVChange,
       },
     });
     fieldEls[field] = input;
-    const preview = FormulaPreview({ className: 'plot-row__preview', placeholder: 'system preview' });
+    const preview = FormulaPreview({ className: 'plot-row__preview', placeholder: t('system preview') });
     previews[field] = preview;
     return h('span', { class: 'plot-row__field plot-row__field--system' }, input, preview.root);
   }
@@ -125,11 +126,11 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onUVChange,
       { class: 'plot-row__tRange' },
       'u:',
       uminEl,
-      'to',
+      t('to'),
       umaxEl,
       'v:',
       vminEl,
-      'to',
+      t('to'),
       vmaxEl,
     );
   }
@@ -142,20 +143,21 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onUVChange,
 
     if (mode === 'parametric') {
       fieldsWrap.append(
-        makeField('exprX', 'x(u,v), e.g. cos(u)*sin(v)', 'x(u,v)'),
-        makeField('exprY', 'y(u,v), e.g. sin(u)*sin(v)', 'y(u,v)'),
-        makeField('exprZ', 'z(u,v), e.g. cos(v)', 'z(u,v)'),
+        makeField('exprX', t('x(u,v), e.g. cos(u)*sin(v)'), 'x(u,v)'),
+        makeField('exprY', t('y(u,v), e.g. sin(u)*sin(v)'), 'y(u,v)'),
+        makeField('exprZ', t('z(u,v), e.g. cos(v)'), 'z(u,v)'),
         makeUVRange(),
       );
     } else if (mode === 'system') {
       const field = makeMultilineField('exprSystem', 'x^2+y^2+z^2=4\nz>0');
-      field.title =
+      field.title = t(
         'One equation or inequality per line, in x, y and z - Shift+Enter for a new line. ' +
-        'Equations are drawn as isosurfaces (with 3+ of them, solved for their intersection ' +
-        "point(s), marked with dots); inequalities are combined into one shaded region.";
+          'Equations are drawn as isosurfaces (with 3+ of them, solved for their intersection ' +
+          'point(s), marked with dots); inequalities are combined into one shaded region.',
+      );
       fieldsWrap.append(field);
     } else {
-      fieldsWrap.append(makeField('expr', 'f(x,y), e.g. sin(x*y)', 'f(x,y)'));
+      fieldsWrap.append(makeField('expr', t('f(x,y), e.g. sin(x*y)'), 'f(x,y)'));
     }
   }
 
@@ -179,7 +181,7 @@ function createRowView({ onModeChange, onFieldInput, onFieldKeyDown, onUVChange,
     if (vmaxEl && vmaxEl.value !== row.vmax) vmaxEl.value = row.vmax;
 
     toggleBtn.textContent = row.visible ? '●' : '○';
-    toggleBtn.title = row.visible ? 'Hide' : 'Show';
+    toggleBtn.title = row.visible ? t('Hide') : t('Show');
 
     if (errorMessage) {
       errorSpan.textContent = errorMessage;
@@ -309,7 +311,7 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   // element/class/wording as the 2D panel's own statusEl (see plotPanel.js), toggled the same
   // way via setConnectionStatus below. Distinct from loadingEl's own text just below, which
   // instead reports the Plotly library itself failing to load.
-  const statusEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' }, 'Reconnecting to calculator…');
+  const statusEl = h('span', { class: 'plot-panel__status plot-panel__status--bad' }, t('Reconnecting to calculator…'));
   statusEl.style.display = 'none';
 
   const popOutBtn = h(
@@ -317,22 +319,22 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
     {
       type: 'button',
       class: 'plot-panel__iconBtn',
-      title: standalone ? 'Open another 3D plot window' : 'Move this plot to a new window',
+      title: standalone ? t('Open another 3D plot window') : t('Move this plot to a new window'),
       onclick: () => onPopOut?.(),
     },
     '⧉',
   );
   if (!onPopOut) popOutBtn.style.display = 'none';
 
-  const closeBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: 'Close plot', onclick: () => onClose?.() }, '×');
+  const closeBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: t('Close plot'), onclick: () => onClose?.() }, '×');
   if (standalone || !onClose) closeBtn.style.display = 'none';
 
   const rowsContainer = h('div', { class: 'plot-panel__rows' });
-  const addRowBtn = h('button', { type: 'button', class: 'plot-panel__addRow', onclick: () => addRow() }, '+ Add surface');
+  const addRowBtn = h('button', { type: 'button', class: 'plot-panel__addRow', onclick: () => addRow() }, t('+ Add surface'));
   const rowsHint = h(
     'span',
     { class: 'plot-panel__hint' },
-    'Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.',
+    t('Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.'),
   );
   rowsContainer.append(addRowBtn, rowsHint);
 
@@ -343,20 +345,20 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   // plotInitialized above included) - none of it is lifted to app.js.
   const rowsToggleBtn = h(
     'button',
-    { type: 'button', class: 'plot-panel__iconBtn', title: 'Hide equations', onclick: () => setRowsHidden(!rowsHidden) },
+    { type: 'button', class: 'plot-panel__iconBtn', title: t('Hide equations'), onclick: () => setRowsHidden(!rowsHidden) },
     '▾',
   );
   function setRowsHidden(value) {
     rowsHidden = value;
     rowsContainer.style.display = rowsHidden ? 'none' : '';
     rowsToggleBtn.textContent = rowsHidden ? '▸' : '▾';
-    rowsToggleBtn.title = rowsHidden ? 'Show equations' : 'Hide equations';
+    rowsToggleBtn.title = rowsHidden ? t('Show equations') : t('Hide equations');
   }
 
   const header = h(
     'div',
     { class: 'plot-panel__header' },
-    h('span', { class: 'plot-panel__title' }, '3D Plot'),
+    h('span', { class: 'plot-panel__title' }, t('3D Plot')),
     statusEl,
     h('div', { class: 'plot-panel__headerActions' }, rowsToggleBtn, popOutBtn, closeBtn),
   );
@@ -380,27 +382,27 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
     zmin: makeBoundInput('z', 'min'),
     zmax: makeBoundInput('z', 'max'),
   };
-  const resetViewBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: 'Reset view box', onclick: () => onViewChange(DEFAULT_VIEW_3D) }, '⟲');
+  const resetViewBtn = h('button', { type: 'button', class: 'plot-panel__iconBtn', title: t('Reset view box'), onclick: () => onViewChange(DEFAULT_VIEW_3D) }, '⟲');
   const viewBar = h(
     'div',
     { class: 'plot3d-panel__viewBar' },
     'x:',
     boundEls.xmin,
-    'to',
+    t('to'),
     boundEls.xmax,
     'y:',
     boundEls.ymin,
-    'to',
+    t('to'),
     boundEls.ymax,
     'z:',
     boundEls.zmin,
-    'to',
+    t('to'),
     boundEls.zmax,
     resetViewBtn,
   );
 
   const plotDiv = h('div', { class: 'plot3d-panel__plot' });
-  const loadingEl = h('div', { class: 'plot3d-panel__loading' }, 'Loading 3D plotting library…');
+  const loadingEl = h('div', { class: 'plot3d-panel__loading' }, t('Loading 3D plotting library…'));
   const plotWrap = h('div', { class: 'plot-panel__canvasWrap plot3d-panel__plotWrap' }, plotDiv, loadingEl);
 
   const root = h('div', { class: 'plot-panel' }, header, rowsContainer, viewBar, plotWrap);

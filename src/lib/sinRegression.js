@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Sinusoidal ("SinReg") least-squares fit: finds a, b, c, d minimizing
 // sum((y_i - (a*sin(b*x_i+c)+d))^2) over a set of (x_i, y_i) points. Giac has native
 // linear/exponential/logarithmic/power/polynomial/logistic regressions (see
@@ -110,14 +111,14 @@ export function fitSinusoid(xsIn, ysIn) {
   const pts = xsIn
     .map((x, i) => ({ x, y: ysIn[i] }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-  if (pts.length < 4) throw new Error('Need at least 4 numeric (x,y) points to fit a sinusoid.');
+  if (pts.length < 4) throw new Error(t('Need at least 4 numeric (x,y) points to fit a sinusoid.'));
   pts.sort((p, q) => p.x - q.x);
   const xs = pts.map((p) => p.x);
   const ys = pts.map((p) => p.y);
   const n = xs.length;
 
   const xSpan = xs[n - 1] - xs[0];
-  if (!(xSpan > 0)) throw new Error('All x-values are identical - cannot estimate a frequency.');
+  if (!(xSpan > 0)) throw new Error(t('All x-values are identical - cannot estimate a frequency.'));
   const spacing = xSpan / (n - 1);
 
   // Allow detecting a period up to twice the data span (a bit under one full cycle across
@@ -125,7 +126,7 @@ export function fitSinusoid(xsIn, ysIn) {
   // average spacing at the high end, where a fit becomes unreliable/aliased.
   const bMin = (2 * Math.PI) / (xSpan * 4);
   const bMax = ((Math.PI / spacing) * 9) / 10;
-  if (!(bMax > bMin)) throw new Error('Not enough distinct x-values to estimate a frequency.');
+  if (!(bMax > bMin)) throw new Error(t('Not enough distinct x-values to estimate a frequency.'));
 
   let best = null;
   for (let i = 0; i <= GRID_STEPS; i++) {
@@ -133,7 +134,7 @@ export function fitSinusoid(xsIn, ysIn) {
     const fit = fitAtFrequency(b, xs, ys);
     if (fit && (!best || fit.rss < best.rss)) best = { ...fit, b };
   }
-  if (!best) throw new Error('Could not fit a sinusoid to this data.');
+  if (!best) throw new Error(t('Could not fit a sinusoid to this data.'));
 
   const gridStep = (bMax - bMin) / GRID_STEPS;
   const refinedB = goldenSectionMin(

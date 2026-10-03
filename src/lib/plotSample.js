@@ -17,6 +17,7 @@ import {
   combineInequalityGrids,
   buildRegionFillPolygons,
 } from './plotSystem.js';
+import { t } from './i18n.js';
 
 // Giac prints large/small magnitudes in scientific notation, sometimes with an explicit
 // "+" exponent sign (e.g. "1e+20"), sometimes with none at all for positive exponents
@@ -124,13 +125,13 @@ export async function sampleFunction(evaluateRaw, expr, xmin, xmax, points, slid
 
   const out = await evaluateRaw(buildSampleExpr(sampleExpr, xmin, xmax, points));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this expression.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this expression.'));
   }
 
   const ys = parseSampleList(out);
-  if (!ys) throw new Error('Unexpected response from the CAS engine.');
+  if (!ys) throw new Error(t('Unexpected response from the CAS engine.'));
   if (ys.length > 0 && ys.every((y) => Number.isNaN(y))) {
-    throw new Error('No real output in the current view (undefined name, or complex-valued here?).');
+    throw new Error(t('No real output in the current view (undefined name, or complex-valued here?).'));
   }
 
   const n = ys.length;
@@ -183,13 +184,13 @@ export async function sampleParametric(evaluateRaw, exprX, exprY, tmin, tmax, po
 
   const out = await evaluateRaw(buildParametricSampleExpr(xe, ye, tmin, tmax, points));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this expression.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this expression.'));
   }
 
   const pts = parseParametricList(out);
-  if (!pts) throw new Error('Unexpected response from the CAS engine.');
+  if (!pts) throw new Error(t('Unexpected response from the CAS engine.'));
   if (pts.length > 0 && pts.every((p) => Number.isNaN(p.x) || Number.isNaN(p.y))) {
-    throw new Error('No real output over this t range (undefined name, or complex-valued here?).');
+    throw new Error(t('No real output over this t range (undefined name, or complex-valued here?).'));
   }
 
   return pts;
@@ -219,13 +220,13 @@ export async function sampleScatter(evaluateRaw, exprX, exprY) {
   // evaluation at a time, so firing both requests concurrently would drop the first
   // response and leave its promise hanging forever.
   const outX = await evaluateRaw(`evalf(${xe})`);
-  if (outX.startsWith('GIAC_ERROR')) throw new Error(outX.slice(11).trim() || 'Could not evaluate the x data.');
+  if (outX.startsWith('GIAC_ERROR')) throw new Error(outX.slice(11).trim() || t('Could not evaluate the x data.'));
   const outY = await evaluateRaw(`evalf(${ye})`);
-  if (outY.startsWith('GIAC_ERROR')) throw new Error(outY.slice(11).trim() || 'Could not evaluate the y data.');
+  if (outY.startsWith('GIAC_ERROR')) throw new Error(outY.slice(11).trim() || t('Could not evaluate the y data.'));
 
   const xs = parseSampleList(outX);
   const ys = parseSampleList(outY);
-  if (!xs || !ys) throw new Error('Expected a list of numbers for each axis, e.g. [1,2,3] or a column name.');
+  if (!xs || !ys) throw new Error(t('Expected a list of numbers for each axis, e.g. [1,2,3] or a column name.'));
   if (xs.length === 0 || ys.length === 0) return [];
 
   const n = Math.min(xs.length, ys.length);
@@ -241,13 +242,13 @@ export async function sampleComplex(evaluateRaw, exprZ, tmin, tmax, points, slid
 
   const out = await evaluateRaw(buildComplexSampleExpr(ze, tmin, tmax, points));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this expression.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this expression.'));
   }
 
   const pts = parseParametricList(out);
-  if (!pts) throw new Error('Unexpected response from the CAS engine.');
+  if (!pts) throw new Error(t('Unexpected response from the CAS engine.'));
   if (pts.length > 0 && pts.every((p) => Number.isNaN(p.x) || Number.isNaN(p.y))) {
-    throw new Error('No real output over this t range (undefined name?).');
+    throw new Error(t('No real output over this t range (undefined name?).'));
   }
 
   return pts;
@@ -372,9 +373,9 @@ async function traceSystemLines(evaluateRaw, lines, buildFExpr, buildGridExpr, p
   const orientedInequalityGrids = [];
   for (const line of lines) {
     const out = await evaluateRaw(buildGridExpr(buildFExpr(line), xmin, xmax, ymin, ymax, nX, nY));
-    if (out.startsWith('GIAC_ERROR')) throw new Error(out.slice(11).trim() || `Could not evaluate "${line.raw}".`);
+    if (out.startsWith('GIAC_ERROR')) throw new Error(out.slice(11).trim() || t('Could not evaluate "{line}".', { line: line.raw }));
     const values = parseValues(out);
-    if (!values) throw new Error('Unexpected response from the CAS engine.');
+    if (!values) throw new Error(t('Unexpected response from the CAS engine.'));
 
     const grid = [];
     for (let i = 0; i < nX; i++) grid.push(values.slice(i * nY, i * nY + nY));
@@ -514,24 +515,24 @@ export async function sampleDiffEqField(evaluateRaw, rawExpr, view, nx, ny) {
 
   const solveOut = await evaluateRaw(`solve(${eqForSolve},${solveVar})`);
   if (solveOut.startsWith('GIAC_ERROR')) {
-    throw new Error(solveOut.slice(11).trim() || 'Could not solve this equation for its highest derivative.');
+    throw new Error(solveOut.slice(11).trim() || t('Could not solve this equation for its highest derivative.'));
   }
   const solutions = parseSolveList(solveOut);
   if (!solutions || solutions.length === 0) {
-    throw new Error(`Could not isolate ${solveVar === 'D2Y' ? "y''" : "y'"} - try an equation linear in the highest derivative.`);
+    throw new Error(t('Could not isolate {derivative} - try an equation linear in the highest derivative.', { derivative: solveVar === 'D2Y' ? "y''" : "y'" }));
   }
 
   const { comp1, comp2 } = buildFieldComponents(order, solutions[0]);
   const { xmin, xmax, ymin, ymax } = view;
   const out = await evaluateRaw(buildFieldSampleExpr(comp1, comp2, xmin, xmax, ymin, ymax, nx, ny));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this vector field.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this vector field.'));
   }
 
   const pts = parseFieldList(out);
-  if (!pts) throw new Error('Unexpected response from the CAS engine.');
+  if (!pts) throw new Error(t('Unexpected response from the CAS engine.'));
   if (pts.length > 0 && pts.every((p) => !Number.isFinite(p.dx) || !Number.isFinite(p.dy))) {
-    throw new Error('No real vectors in the current view (undefined name, or complex-valued here?).');
+    throw new Error(t('No real vectors in the current view (undefined name, or complex-valued here?).'));
   }
 
   return pts;
@@ -548,11 +549,11 @@ export async function sampleContinuousDistribution(evaluateRaw, family, params, 
 
   const out = await evaluateRaw(buildSampleExpr(expr, xmin, xmax, points));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this distribution.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this distribution.'));
   }
 
   const ys = parseSampleList(out);
-  if (!ys) throw new Error('Unexpected response from the CAS engine.');
+  if (!ys) throw new Error(t('Unexpected response from the CAS engine.'));
 
   const n = ys.length;
   const step = n > 1 ? (xmax - xmin) / (n - 1) : 0;
@@ -584,11 +585,11 @@ export async function sampleDiscreteDistribution(evaluateRaw, family, params, xm
 
   const out = await evaluateRaw(built.expr);
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this distribution.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this distribution.'));
   }
 
   const ys = parseSampleList(out);
-  if (!ys) throw new Error('Unexpected response from the CAS engine.');
+  if (!ys) throw new Error(t('Unexpected response from the CAS engine.'));
 
   const pts = [];
   ys.forEach((y, i) => {

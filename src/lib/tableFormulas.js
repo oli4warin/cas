@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Spreadsheet-style formulas for the Table panel (see components/tablePanel.js). A cell whose
 // text starts with "=" is a formula: cell references like A2 or B3 (column letter + 1-based
 // row number, exactly the labels the grid shows) and ranges like A1:A5 are swapped for the
@@ -66,12 +67,12 @@ export async function evaluateSheet(columns, evalRaw, isStale = () => false) {
     if (!isFormula(raw)) return (results[c][r] = { value: raw, error: null });
 
     const key = `${c},${r}`;
-    if (visiting.has(key)) throw new CellError('Circular reference.');
+    if (visiting.has(key)) throw new CellError(t('Circular reference.'));
     visiting.add(key);
     let result;
     try {
       const refValue = async (rc, rr, label) => {
-        if (rc >= columns.length || rr >= columns[rc].length) throw new CellError(`${label} is outside the table.`);
+        if (rc >= columns.length || rr >= columns[rc].length) throw new CellError(t('{cell} is outside the table.', { cell: label }));
         const ref = await resolve(rc, rr);
         if (ref.error) throw new CellError(rc === c && rr === r ? ref.error : `${label}: ${ref.error}`);
         return ref.value;
@@ -96,11 +97,11 @@ export async function evaluateSheet(columns, evalRaw, isStale = () => false) {
         }
         return `[${values.join(',')}]`;
       });
-      if (!expanded.trim()) throw new CellError('Empty formula.');
+      if (!expanded.trim()) throw new CellError(t('Empty formula.'));
       if (isStale()) throw new CellError('Cancelled.');
       const out = await evalRaw(expanded);
       if (typeof out !== 'string' || out.startsWith('GIAC_ERROR')) {
-        throw new CellError((typeof out === 'string' && out.slice(11).trim()) || 'Could not evaluate this formula.');
+        throw new CellError((typeof out === 'string' && out.slice(11).trim()) || t('Could not evaluate this formula.'));
       }
       result = { value: out.trim(), error: null };
     } catch (e) {

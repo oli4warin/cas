@@ -8,6 +8,7 @@ import { normalizePowerCalls } from './giac.js';
 import { parseSampleList, splitTopLevel, NUMBER_RE } from './plotSample.js';
 import { splitDomainRestriction, applyDomainRestriction } from './plotDomain.js';
 import { parseSystemLines, orientForHolds } from './plotSystem.js';
+import { t } from './i18n.js';
 
 function formatNum(n) {
   return Number.isFinite(n) ? n.toString() : '0';
@@ -53,12 +54,12 @@ export async function sampleSurface(evaluateRaw, expr, xmin, xmax, ymin, ymax, n
 
   const out = await evaluateRaw(buildSurfaceGridExpr(sampleExpr, xmin, xmax, ymin, ymax, nX, nY));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this expression.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this expression.'));
   }
   const values = parseSampleList(out);
-  if (!values) throw new Error('Unexpected response from the CAS engine.');
+  if (!values) throw new Error(t('Unexpected response from the CAS engine.'));
   if (values.length > 0 && values.every((v) => Number.isNaN(v))) {
-    throw new Error('No real output in the current view (undefined name, or complex-valued here?).');
+    throw new Error(t('No real output in the current view (undefined name, or complex-valued here?).'));
   }
 
   const xs = Array.from({ length: nX }, (_, i) => xmin + (i * (xmax - xmin)) / (nX - 1));
@@ -123,12 +124,12 @@ export async function sampleParametricSurface(evaluateRaw, exprX, exprY, exprZ, 
 
   const out = await evaluateRaw(buildParametricSurfaceExpr(xe, ye, ze, umin, umax, vmin, vmax, nU, nV));
   if (out.startsWith('GIAC_ERROR')) {
-    throw new Error(out.slice(11).trim() || 'Could not evaluate this expression.');
+    throw new Error(out.slice(11).trim() || t('Could not evaluate this expression.'));
   }
   const pts = parseTripleList(out);
-  if (!pts) throw new Error('Unexpected response from the CAS engine.');
+  if (!pts) throw new Error(t('Unexpected response from the CAS engine.'));
   if (pts.length > 0 && pts.every((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z))) {
-    throw new Error('No real output over this u/v range (undefined name, or complex-valued here?).');
+    throw new Error(t('No real output over this u/v range (undefined name, or complex-valued here?).'));
   }
 
   const at = (iu, iv, key) => {
@@ -238,9 +239,9 @@ export async function sampleSystem3d(evaluateRaw, text, view, n, definitions) {
   for (const line of lines) {
     const fExpr = `(${line.lhs})-(${line.rhs})`;
     const out = await evaluateRaw(buildScalarGrid3dExpr(fExpr, xmin, xmax, ymin, ymax, zmin, zmax, nX, nY, nZ));
-    if (out.startsWith('GIAC_ERROR')) throw new Error(out.slice(11).trim() || `Could not evaluate "${line.raw}".`);
+    if (out.startsWith('GIAC_ERROR')) throw new Error(out.slice(11).trim() || t('Could not evaluate "{line}".', { line: line.raw }));
     const values = parseSampleList(out);
-    if (!values) throw new Error('Unexpected response from the CAS engine.');
+    if (!values) throw new Error(t('Unexpected response from the CAS engine.'));
 
     if (line.kind === 'equation') {
       equationValues.push(values.map((v) => (Number.isFinite(v) ? v : OUT_OF_DOMAIN)));

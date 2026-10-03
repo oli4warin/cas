@@ -2,11 +2,28 @@ import { h, clear } from '../lib/dom.js';
 import { makeColumn } from '../lib/tableColumns.js';
 import { loadJspreadsheet } from '../lib/jspreadsheet.js';
 import { reinsertableValue } from '../lib/giac.js';
+import { t } from '../lib/i18n.js';
 import { evaluateSheet, isFormula, columnLetter, cellLabel } from '../lib/tableFormulas.js';
 
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ASSIGN_DEBOUNCE_MS = 400;
 const COLUMN_WIDTH = 120;
+
+// The library's own interface texts this panel can actually bring up (its right-click menu and
+// the confirmations behind it) - handed back to it translated, see mountGrid.
+const GRID_TEXTS = [
+  'Insert a new row before',
+  'Insert a new row after',
+  'Delete selected rows',
+  'Insert a new column before',
+  'Insert a new column after',
+  'Delete selected columns',
+  'Copy',
+  'Paste',
+  'Are you sure to delete the selected rows?',
+  'Are you sure to delete the selected columns?',
+  'No cells selected',
+];
 
 // Lets the user type a small spreadsheet and turns each named column into a Giac list
 // variable (see lib/tableColumns.js). Columns push to the CAS session on their own, the same
@@ -36,37 +53,37 @@ export function TablePanel({ columns: initialColumns, evaluateRaw, onColumnsChan
   const assignedNames = new Set();
   const columnErrors = new Map(); // column index -> message
 
-  const closeBtn = h('button', { type: 'button', class: 'table-panel__iconBtn', title: 'Close table', onclick: () => onClose?.() }, '×');
+  const closeBtn = h('button', { type: 'button', class: 'table-panel__iconBtn', title: t('Close table'), onclick: () => onClose?.() }, '×');
   if (!onClose) closeBtn.style.display = 'none';
   const header = h(
     'div',
     { class: 'table-panel__header' },
-    h('span', { class: 'table-panel__title' }, 'Table'),
+    h('span', { class: 'table-panel__title' }, t('Table')),
     h('div', { class: 'table-panel__headerActions' }, closeBtn),
   );
 
   // tabindex so the grid can hold DOM focus while a cell is merely selected (the library
   // tracks its selection on its own and focuses nothing) - see onselection below.
   const gridHost = h('div', { class: 'table-panel__grid', tabindex: '-1' });
-  const gridWrap = h('div', { class: 'table-panel__gridWrap' }, h('span', { class: 'table-panel__loading' }, 'Loading table…'), gridHost);
+  const gridWrap = h('div', { class: 'table-panel__gridWrap' }, h('span', { class: 'table-panel__loading' }, t('Loading table…')), gridHost);
 
   const status = h('div', { class: 'table-panel__status' });
   status.style.display = 'none';
   const footer = h(
     'div',
     { class: 'table-panel__footer' },
-    h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => sheet?.insertRow() }, '+ Add row'),
-    h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => sheet?.insertColumn() }, '+ Add column'),
+    h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => sheet?.insertRow() }, t('+ Add row')),
+    h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => sheet?.insertColumn() }, t('+ Add column')),
     h(
       'span',
       { class: 'table-panel__hint' },
-      'Each named column becomes a list variable (e.g. ',
+      t('Each named column becomes a list variable (e.g. '),
       h('code', null, 'name := [ … ]'),
-      ') usable anywhere, including a scatter plot row. Formulas start with = and can use cells and any CAS command: ',
+      t(') usable anywhere, including a scatter plot row. Formulas start with = and can use cells and any CAS command: '),
       h('code', null, '=A2+B3'),
       ', ',
       h('code', null, '=sum(A1:A5)'),
-      '. Right-click for rows/columns · drag the corner of a selection to fill · Esc returns to the input.',
+      t('. Right-click for rows/columns · drag the corner of a selection to fill · Esc returns to the input.'),
     ),
     status,
   );
@@ -129,7 +146,7 @@ export function TablePanel({ columns: initialColumns, evaluateRaw, onColumnsChan
     const input = h('input', {
       class: 'table-panel__colName',
       type: 'text',
-      placeholder: 'name',
+      placeholder: t('name'),
       // Kept from the library's own document-level handlers, which would otherwise treat a
       // click in here as "select/drag this column" and swap the context menu for its own.
       onmousedown: stop,
@@ -248,11 +265,11 @@ export function TablePanel({ columns: initialColumns, evaluateRaw, onColumnsChan
     names.forEach((name, x) => {
       if (!name) return;
       if (!IDENT_RE.test(name)) {
-        columnErrors.set(x, 'Column name must be a valid variable name.');
+        columnErrors.set(x, t('Column name must be a valid variable name.'));
         return;
       }
       if (assignments.has(name)) {
-        columnErrors.set(x, `Column ${columnLetter(assignments.get(name).x)} is already named ${name}.`);
+        columnErrors.set(x, t('Column {column} is already named {name}.', { column: columnLetter(assignments.get(name).x), name }));
         return;
       }
       const failed = results[x].findIndex((cell) => cell.error);
@@ -306,6 +323,7 @@ export function TablePanel({ columns: initialColumns, evaluateRaw, onColumnsChan
   function mountGrid(lib) {
     jss = lib;
     gridWrap.querySelector('.table-panel__loading')?.remove();
+    jss.setDictionary(Object.fromEntries(GRID_TEXTS.map((text) => [text, t(text)])));
     const data = initialData();
     [sheet] = jss(gridHost, {
       // Formulas are Giac's business (lib/tableFormulas.js), not the library's: with this off

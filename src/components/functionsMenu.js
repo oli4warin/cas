@@ -1,5 +1,6 @@
 import { h } from '../lib/dom.js';
 import { XCAS_COMMANDS } from '../lib/xcasCommands.js';
+import { t } from '../lib/i18n.js';
 
 // A curated reference of Giac/Xcas functions, grouped by topic, aimed at a middle/early
 // high school level - covers arithmetic, algebra, trig, calculus and basic differential
@@ -107,14 +108,14 @@ export function FunctionsMenu({ onInsert }) {
   const root = h('div', { class: 'functions-menu' });
   const trigger = h(
     'button',
-    { type: 'button', class: 'functions-menu__trigger', title: 'Functions', 'aria-label': 'Functions', onclick: toggle },
+    { type: 'button', class: 'functions-menu__trigger', title: t('Functions'), 'aria-label': t('Functions'), onclick: toggle },
     '☰',
   );
   const panel = h('div', { class: 'functions-menu__panel' });
   root.append(trigger, panel);
 
   for (const cat of CATEGORIES) {
-    const section = h('div', { class: 'functions-menu__section' }, h('div', { class: 'functions-menu__heading' }, cat.title));
+    const section = h('div', { class: 'functions-menu__section' }, h('div', { class: 'functions-menu__heading' }, t(cat.title)));
     for (const item of cat.items) {
       section.appendChild(
         h(
@@ -128,7 +129,7 @@ export function FunctionsMenu({ onInsert }) {
             },
           },
           h('span', { class: 'functions-menu__itemLabel' }, item.label),
-          item.hint ? h('span', { class: 'functions-menu__itemHint' }, item.hint) : null,
+          item.hint ? h('span', { class: 'functions-menu__itemHint' }, t(item.hint)) : null,
         ),
       );
     }

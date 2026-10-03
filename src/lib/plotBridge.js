@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Lets a popped-out plot window (a separate browsing context, so it has no access to the
 // main window's JS heap or its Giac worker) reach the CAS session that opened it. A
 // BroadcastChannel is used instead of window.opener/postMessage because it doesn't depend
@@ -110,7 +111,7 @@ export function connectBridgeClient({ sessionId, onDefinitions, onConnectionChan
       const timer = setTimeout(() => {
         pending.delete(id);
         setConnected(false);
-        reject(new Error('The calculator tab is not responding. Is it still open?'));
+        reject(new Error(t('The calculator tab is not responding. Is it still open?')));
       }, EVAL_TIMEOUT_MS);
       pending.set(id, { resolve, reject, timer });
       channel.postMessage({ type: 'eval-request', sessionId, id, expr });
@@ -126,7 +127,7 @@ export function connectBridgeClient({ sessionId, onDefinitions, onConnectionChan
       const id = nextId++;
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject(new Error('Timed out waiting for the calculator tab to hand over its plot.'));
+        reject(new Error(t('Timed out waiting for the calculator tab to hand over its plot.')));
       }, EVAL_TIMEOUT_MS);
       pending.set(id, { resolve, reject, timer });
       channel.postMessage({ type: 'request-plot-state', sessionId, id, kind });
