@@ -19,6 +19,10 @@ licensed under the [Apache License 2.0](https://github.com/mathjax/MathJax/blob/
 3D plots are rendered by [Plotly.js](https://plotly.com/javascript/) and its contributors,
 licensed under the [MIT License](https://github.com/plotly/plotly.js/blob/master/LICENSE).
 
+The table's grid is [Jspreadsheet CE](https://bossanova.uk/jspreadsheet/) (with
+[jSuites](https://jsuites.net/)) and its contributors, licensed under the
+[MIT License](https://github.com/jspreadsheet/ce/blob/master/LICENSE).
+
 ## Running it
 
 Because it uses ES modules (`<script type="module">`) and a Web Worker, it must be served

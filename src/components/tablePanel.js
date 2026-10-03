@@ -1,37 +1,40 @@
-import { h, reconcileOrder } from '../lib/dom.js';
+import { h, clear } from '../lib/dom.js';
 import { makeColumn } from '../lib/tableColumns.js';
+import { loadJspreadsheet } from '../lib/jspreadsheet.js';
+import { reinsertableValue } from '../lib/giac.js';
+import { evaluateSheet, isFormula, columnLetter, cellLabel } from '../lib/tableFormulas.js';
 
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ASSIGN_DEBOUNCE_MS = 400;
+const COLUMN_WIDTH = 120;
 
 // Lets the user type a small spreadsheet and turns each named column into a Giac list
-// variable (see lib/tableColumns.js). Columns push to the CAS session on their own,
-// debounced, the same way PlotPanel resamples on a timer - there's no explicit "submit".
-export function TablePanel({ columns: initialColumns, onColumnsChange, onAssign, onPurge, onClose }) {
+// variable (see lib/tableColumns.js). Columns push to the CAS session on their own, the same
+// way PlotPanel resamples on a timer - there's no explicit "submit".
+//
+// The grid itself is Jspreadsheet CE (see lib/jspreadsheet.js), which brings the Excel-like
+// editing - cell selection, copy/paste, drag-to-fill, undo, a right-click menu for inserting
+// and deleting rows/columns. Two things are this panel's own on top of it:
+//  - each column header holds a name input next to the column's letter (A, B, ...): the name
+//    is the CAS variable, the letter is only for cell references;
+//  - cells starting with "=" are formulas ("=A2+B3"), evaluated by Giac rather than by the
+//    library (see lib/tableFormulas.js) - the library is told not to parse them, keeps the
+//    formula text as the cell's data, and this panel writes the results into the cells.
+export function TablePanel({ columns: initialColumns, evaluateRaw, onColumnsChange, onAssign, onPurge, onClose }) {
   let columns = initialColumns;
-  const errors = {}; // colId -> message | null
-  // Tracks which variable name is currently live in the engine for each column, so a
-  // rename or a column becoming empty can purge the *old* name instead of leaving it
-  // bound to stale data.
-  const assigned = {};
-  let assignTimer = null;
-  let pendingFocus = null; // { colId, rowIdx }
-
-  const colViews = new Map(); // colId -> { th, nameInput, errorSpan, removeBtn }
-  const rowEls = []; // rowIdx -> { tr, rowHead, cells: Map(colId -> input), removeBtn }
-
-  const headRowCorner = h('th', { class: 'table-panel__rowHead' });
-  const headRow = h('tr', null, headRowCorner);
-  const addColHead = h(
-    'th',
-    { class: 'table-panel__addColHead' },
-    h('button', { type: 'button', class: 'table-panel__iconBtn', title: 'Add column', onclick: () => addColumn() }, '+'),
-  );
-  headRow.appendChild(addColHead);
-  const thead = h('thead', null, headRow);
-  const tbody = h('tbody');
-  const grid = h('table', { class: 'table-panel__grid' }, thead, tbody);
-  const gridWrap = h('div', { class: 'table-panel__gridWrap' }, grid);
+  let jss = null; // the Jspreadsheet library function, once loaded
+  let sheet = null; // the worksheet instance
+  let destroyed = false;
+  let passTimer = null;
+  let passGeneration = 0;
+  // Last evaluated sheet, { raw, results } (both column-major) - lets a cell whose own text
+  // hasn't changed keep showing its previous result while a new pass is still running,
+  // instead of flashing its formula text every time the library re-renders it.
+  let shown = null;
+  // Variable names this panel has put into the engine, so a rename or a column becoming
+  // empty can purge the *old* name instead of leaving it bound to stale data.
+  const assignedNames = new Set();
+  const columnErrors = new Map(); // column index -> message
 
   const closeBtn = h('button', { type: 'button', class: 'table-panel__iconBtn', title: 'Close table', onclick: () => onClose?.() }, '×');
   if (!onClose) closeBtn.style.display = 'none';
@@ -42,300 +45,346 @@ export function TablePanel({ columns: initialColumns, onColumnsChange, onAssign,
     h('div', { class: 'table-panel__headerActions' }, closeBtn),
   );
 
-  const addRowBtn = h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => addRow() }, '+ Add row');
+  // tabindex so the grid can hold DOM focus while a cell is merely selected (the library
+  // tracks its selection on its own and focuses nothing) - see onselection below.
+  const gridHost = h('div', { class: 'table-panel__grid', tabindex: '-1' });
+  const gridWrap = h('div', { class: 'table-panel__gridWrap' }, h('span', { class: 'table-panel__loading' }, 'Loading table…'), gridHost);
+
+  const status = h('div', { class: 'table-panel__status' });
+  status.style.display = 'none';
   const footer = h(
     'div',
     { class: 'table-panel__footer' },
-    addRowBtn,
+    h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => sheet?.insertRow() }, '+ Add row'),
+    h('button', { type: 'button', class: 'table-panel__addRow', onclick: () => sheet?.insertColumn() }, '+ Add column'),
     h(
       'span',
       { class: 'table-panel__hint' },
       'Each named column becomes a list variable (e.g. ',
       h('code', null, 'name := [ … ]'),
-      ') usable anywhere, including a scatter plot row. Arrow keys move between cells · Enter moves down (adds a row past the bottom) · Esc returns to the input.',
+      ') usable anywhere, including a scatter plot row. Formulas start with = and can use cells and any CAS command: ',
+      h('code', null, '=A2+B3'),
+      ', ',
+      h('code', null, '=sum(A1:A5)'),
+      '. Right-click for rows/columns · drag the corner of a selection to fill · Esc returns to the input.',
     ),
+    status,
   );
 
   const root = h('div', { class: 'table-panel' }, header, gridWrap, footer);
 
-  function rowCount() {
-    return columns.reduce((max, c) => Math.max(max, c.cells.length), 1);
+  const columnName = (x) => sheet.options.columns[x]?.title ?? '';
+  const columnCount = () => sheet.options.columns.length;
+
+  // ---------- model <-> grid ----------
+
+  function initialData() {
+    const rows = columns.reduce((max, c) => Math.max(max, c.cells.length), 1);
+    return Array.from({ length: rows }, (_, r) => columns.map((c) => c.cells[r] ?? ''));
   }
 
-  function emitColumns(next) {
-    columns = next;
+  // Rebuilds `columns` (the shape the session persists - see lib/sessionPersistence.js) from
+  // the grid, which is the source of truth once it exists: the library moves each column's
+  // title along with its cells through every insert/delete/drag/undo, so names stay attached
+  // to the right data without this panel tracking any of that itself.
+  function readColumns() {
+    const data = sheet.getData();
+    columns = Array.from({ length: columnCount() }, (_, x) => ({
+      ...(columns[x] ?? makeColumn()),
+      name: columnName(x),
+      cells: data.map((row) => String(row[x] ?? '')),
+    }));
     onColumnsChange(columns);
-    renderGrid();
-    scheduleAssign();
   }
 
-  function addColumn() {
-    emitColumns([...columns, makeColumn('', columns[0]?.cells.length)]);
+  const rawSheet = () => columns.map((c) => c.cells);
+
+  // ---------- header name inputs ----------
+
+  // The library hands text to a selected cell on *any* document keydown/paste while it has a
+  // "current" worksheet, wherever DOM focus actually is - so focus moving to a field that
+  // isn't the grid (a column name, the calculator's own input) has to take that away, or
+  // typing there would land in the last-selected cell instead.
+  function releaseGrid() {
+    if (!sheet) return;
+    if (sheet.edition) sheet.closeEditor(sheet.edition[0], true);
+    sheet.resetSelection();
+    if (jss.current === sheet) jss.current = null;
   }
 
-  function removeColumn(id) {
-    if (columns.length <= 1) return;
-    const name = assigned[id];
-    if (name) {
-      onPurge(name);
-      delete assigned[id];
-    }
-    delete errors[id];
-    emitColumns(columns.filter((c) => c.id !== id));
+  function selectCell(x, y) {
+    document.activeElement?.blur?.();
+    jss.current = sheet;
+    sheet.updateSelectionFromCoords(x, y, x, y);
+    gridHost.focus({ preventScroll: true });
   }
 
-  function addRow() {
-    emitColumns(columns.map((c) => ({ ...c, cells: [...c.cells, ''] })));
-  }
+  const nameInputAt = (x) => sheet.headers[x]?.querySelector('.table-panel__colName');
+  const xOfInput = (input) => Number(input.closest('td').getAttribute('data-x'));
 
-  function removeRow(rowIdx) {
-    emitColumns(columns.map((c) => ({ ...c, cells: c.cells.length > 1 ? c.cells.filter((_, i) => i !== rowIdx) : c.cells })));
-  }
-
-  function updateColumnName(id, name) {
-    emitColumns(columns.map((c) => (c.id === id ? { ...c, name } : c)));
-  }
-
-  function updateCell(id, rowIdx, value) {
-    emitColumns(columns.map((c) => (c.id === id ? { ...c, cells: c.cells.map((v, i) => (i === rowIdx ? value : v)) } : c)));
-  }
-
-  function focusCell(colId, rowIdx) {
-    rowEls[rowIdx]?.cells.get(colId)?.focus();
-  }
-  function focusColName(colId) {
-    colViews.get(colId)?.nameInput.focus();
-  }
-
-  const atStart = (e) => e.target.selectionStart === 0 && e.target.selectionEnd === 0;
-  const atEnd = (e) => e.target.selectionStart === e.target.value.length && e.target.selectionEnd === e.target.value.length;
-
-  function handleCellKeyDown(e, colId, rowIdx) {
-    const colIdx = columns.findIndex((c) => c.id === colId);
-
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const nextRowIdx = rowIdx + 1;
-      if (nextRowIdx < rowCount()) {
-        focusCell(colId, nextRowIdx);
-      } else {
-        pendingFocus = { colId, rowIdx: nextRowIdx };
-        addRow();
-      }
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (rowIdx + 1 < rowCount()) focusCell(colId, rowIdx + 1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (rowIdx === 0) focusColName(colId);
-      else focusCell(colId, rowIdx - 1);
-      return;
-    }
-    if (e.key === 'ArrowLeft' && atStart(e) && colIdx > 0) {
-      e.preventDefault();
-      focusCell(columns[colIdx - 1].id, rowIdx);
-      return;
-    }
-    if (e.key === 'ArrowRight' && atEnd(e) && colIdx < columns.length - 1) {
-      e.preventDefault();
-      focusCell(columns[colIdx + 1].id, rowIdx);
-    }
-  }
-
-  function handleColNameKeyDown(e, colId) {
-    const colIdx = columns.findIndex((c) => c.id === colId);
-
-    if (e.key === 'Enter' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      focusCell(colId, 0);
-      return;
-    }
-    if (e.key === 'ArrowLeft' && atStart(e) && colIdx > 0) {
-      e.preventDefault();
-      focusColName(columns[colIdx - 1].id);
-      return;
-    }
-    if (e.key === 'ArrowRight' && atEnd(e) && colIdx < columns.length - 1) {
-      e.preventDefault();
-      focusColName(columns[colIdx + 1].id);
-    }
-  }
-
-  function createColView(col) {
-    const nameInput = h('input', {
+  function createNameInput() {
+    const atStart = (el) => el.selectionStart === 0 && el.selectionEnd === 0;
+    const atEnd = (el) => el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+    const stop = (e) => e.stopPropagation();
+    const input = h('input', {
       class: 'table-panel__colName',
       type: 'text',
       placeholder: 'name',
-      oninput: (e) => updateColumnName(col.id, e.target.value),
-      onkeydown: (e) => handleColNameKeyDown(e, col.id),
-    });
-    const removeBtn = h(
-      'button',
-      { type: 'button', class: 'table-panel__removeCol', title: 'Remove column', onclick: () => removeColumn(col.id) },
-      '×',
-    );
-    const errorSpan = h('span', { class: 'table-panel__colError' });
-    errorSpan.style.display = 'none';
-    const th = h(
-      'th',
-      { class: 'table-panel__colHead' },
-      h('span', { class: 'table-panel__colHeadRow' }, nameInput, removeBtn),
-      errorSpan,
-    );
-    return { th, nameInput, removeBtn, errorSpan };
-  }
-
-  function createCellInput(colId, rowIdx) {
-    return h('input', {
-      class: 'table-panel__cell',
-      type: 'text',
-      oninput: (e) => updateCell(colId, rowIdx, e.target.value),
-      onkeydown: (e) => handleCellKeyDown(e, colId, rowIdx),
-    });
-  }
-
-  function renderGrid() {
-    const n = rowCount();
-
-    // Reconcile column headers (order = columns array order).
-    const seenCols = new Set();
-    const desiredCols = [];
-    columns.forEach((col) => {
-      seenCols.add(col.id);
-      let view = colViews.get(col.id);
-      if (!view) {
-        view = createColView(col);
-        colViews.set(col.id, view);
-      }
-      if (view.nameInput.value !== col.name) view.nameInput.value = col.name;
-      view.removeBtn.disabled = columns.length <= 1;
-      const err = errors[col.id];
-      if (err) {
-        view.errorSpan.textContent = err;
-        view.errorSpan.style.display = '';
-      } else {
-        view.errorSpan.style.display = 'none';
-      }
-      desiredCols.push(view.th);
-    });
-    for (const [id, view] of colViews) {
-      if (!seenCols.has(id)) {
-        view.th.remove();
-        colViews.delete(id);
-      }
-    }
-    const currentCols = Array.from(headRow.children).filter((el) => el !== headRowCorner && el !== addColHead);
-    reconcileOrder(headRow, currentCols, desiredCols, addColHead);
-
-    // Reconcile rows.
-    while (rowEls.length < n) {
-      const rowIdx = rowEls.length;
-      const rowHead = h('td', { class: 'table-panel__rowHead' }, String(rowIdx + 1));
-      const removeBtn = h(
-        'button',
-        { type: 'button', class: 'table-panel__removeRow', title: 'Remove row', onclick: () => removeRow(rowIdx) },
-        '×',
-      );
-      const removeCell = h('td', { class: 'table-panel__rowRemoveCell' }, removeBtn);
-      const tr = h('tr', null, rowHead);
-      tbody.appendChild(tr);
-      tr.appendChild(removeCell);
-      rowEls.push({ tr, rowHead, removeCell, removeBtn, cells: new Map() });
-    }
-    while (rowEls.length > n) {
-      rowEls.pop().tr.remove();
-    }
-
-    rowEls.forEach((rowEl, rowIdx) => {
-      rowEl.rowHead.textContent = String(rowIdx + 1);
-      rowEl.removeBtn.disabled = n <= 1;
-      rowEl.removeBtn.onclick = () => removeRow(rowIdx);
-
-      const seenColsForRow = new Set();
-      const desiredCells = [];
-      columns.forEach((col) => {
-        seenColsForRow.add(col.id);
-        let input = rowEl.cells.get(col.id);
-        if (!input) {
-          input = createCellInput(col.id, rowIdx);
-          rowEl.cells.set(col.id, input);
+      // Kept from the library's own document-level handlers, which would otherwise treat a
+      // click in here as "select/drag this column" and swap the context menu for its own.
+      onmousedown: stop,
+      ondblclick: stop,
+      ontouchstart: stop,
+      oncontextmenu: stop,
+      onfocus: releaseGrid,
+      oninput: (e) => {
+        // Written straight into the library's column config rather than through its
+        // setHeader(), which would re-render the header cell (dropping this very input) and
+        // push an undo step per keystroke.
+        sheet.options.columns[xOfInput(e.target)].title = e.target.value;
+        readColumns();
+        schedulePass(ASSIGN_DEBOUNCE_MS);
+      },
+      onkeydown: (e) => {
+        const x = xOfInput(e.target);
+        if (e.key === 'Enter' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          // selectCell hands the keyboard back to the library, whose own document-level
+          // keydown handler would otherwise act on this very keystroke too (and move on to
+          // the second row).
+          e.stopPropagation();
+          selectCell(x, 0);
+        } else if (e.key === 'ArrowLeft' && atStart(e.target) && x > 0) {
+          e.preventDefault();
+          nameInputAt(x - 1)?.focus();
+        } else if (e.key === 'ArrowRight' && atEnd(e.target) && x < columnCount() - 1) {
+          e.preventDefault();
+          nameInputAt(x + 1)?.focus();
         }
-        input.oninput = (e) => updateCell(col.id, rowIdx, e.target.value);
-        input.onkeydown = (e) => handleCellKeyDown(e, col.id, rowIdx);
-        const value = col.cells[rowIdx] ?? '';
-        if (input.value !== value) input.value = value;
-        desiredCells.push(input.parentElement ?? h('td', null, input));
+      },
+    });
+    input.spellcheck = false;
+    return input;
+  }
+
+  // Idempotent: (re)builds whatever header cells the library has just created or re-rendered
+  // as plain text, and refreshes letters/names/error marks on the rest.
+  function decorateHeaders() {
+    sheet.headers.forEach((td, x) => {
+      let input = td.querySelector('.table-panel__colName');
+      if (!input) {
+        clear(td);
+        input = createNameInput();
+        td.append(h('span', { class: 'table-panel__colLetter' }), input);
+      }
+      td.querySelector('.table-panel__colLetter').textContent = columnLetter(x);
+      if (document.activeElement !== input && input.value !== columnName(x)) input.value = columnName(x);
+      const error = columnErrors.get(x);
+      input.classList.toggle('table-panel__colName--error', !!error);
+      td.setAttribute('title', error ?? '');
+    });
+  }
+
+  // ---------- formulas ----------
+
+  // Writes formula results into the cells. Plain cells are left exactly as the library
+  // rendered them; so is a cell that's currently open in the editor.
+  function paintCells(results) {
+    columns.forEach((col, x) => {
+      col.cells.forEach((raw, y) => {
+        const td = sheet.records[y]?.[x]?.element;
+        if (!td || td.classList.contains('editor')) return;
+        const formula = isFormula(raw);
+        const result = formula ? results?.[x]?.[y] : null;
+        td.classList.toggle('table-panel__cell--formula', formula);
+        td.classList.toggle('table-panel__cell--error', !!result?.error);
+        if (!formula) {
+          td.removeAttribute('title');
+        } else if (result) {
+          td.textContent = result.error ? '#ERR' : result.value;
+          td.setAttribute('title', result.error ? `${raw.trim()}\n${result.error}` : raw.trim());
+        }
       });
-      for (const [id, input] of rowEl.cells) {
-        if (!seenColsForRow.has(id)) {
-          input.parentElement?.remove();
-          rowEl.cells.delete(id);
-        }
-      }
-      const currentCells = Array.from(rowEl.tr.children).filter((el) => el !== rowEl.rowHead && el !== rowEl.removeCell);
-      reconcileOrder(rowEl.tr, currentCells, desiredCells, rowEl.removeCell);
     });
-
-    if (pendingFocus) {
-      const { colId, rowIdx } = pendingFocus;
-      pendingFocus = null;
-      focusCell(colId, rowIdx);
-    }
   }
 
-  function scheduleAssign() {
-    clearTimeout(assignTimer);
-    assignTimer = setTimeout(() => {
-      for (const col of columns) {
-        const name = col.name.trim();
-        const values = col.cells.map((v) => v.trim()).filter((v) => v !== '');
-        const already = assigned[col.id];
+  // Results from the last pass, for every cell whose text is still what that pass saw. A
+  // dependency may have changed underneath it, in which case this is briefly stale - the pass
+  // that's about to run repaints it either way.
+  function carriedOverResults() {
+    if (!shown) return null;
+    return columns.map((col, x) => col.cells.map((raw, y) => (shown.raw[x]?.[y] === raw ? shown.results[x]?.[y] : null)));
+  }
 
-        if (name && IDENT_RE.test(name) && values.length > 0) {
-          if (already && already !== name) onPurge(already);
-          onAssign(`${name}:=[${values.join(',')}]`).then(({ ok, message }) => {
-            assigned[col.id] = ok ? name : null;
-            errors[col.id] = ok ? null : message;
-            renderGrid();
-          });
-        } else {
-          if (already) {
-            onPurge(already);
-            assigned[col.id] = null;
-          }
-          errors[col.id] = !name ? null : !IDENT_RE.test(name) ? 'Column name must be a valid variable name.' : null;
-        }
+  // Every change to the grid ends up here.
+  function sheetChanged() {
+    if (destroyed) return;
+    readColumns();
+    decorateHeaders();
+    paintCells(carriedOverResults());
+    schedulePass(0);
+  }
+
+  function schedulePass(delay) {
+    clearTimeout(passTimer);
+    passTimer = setTimeout(runPass, delay);
+  }
+
+  async function runPass() {
+    const generation = ++passGeneration;
+    const stale = () => destroyed || generation !== passGeneration;
+    const raw = rawSheet().map((cells) => [...cells]);
+    const names = columns.map((c) => c.name.trim());
+    // reinsertableValue: Giac answers "1/3" with "1/3=0.333..." (see lib/giac.js) - only the
+    // exact half belongs in a cell that other formulas and the column's list will reuse.
+    const results = await evaluateSheet(raw, async (expr) => reinsertableValue(await evaluateRaw(expr)), stale);
+    if (!results || stale()) return;
+    shown = { raw, results };
+    paintCells(results);
+
+    // Push each named column into the CAS session as a list of its (evaluated) cells.
+    columnErrors.clear();
+    const assignments = new Map(); // name -> { x, expr }
+    names.forEach((name, x) => {
+      if (!name) return;
+      if (!IDENT_RE.test(name)) {
+        columnErrors.set(x, 'Column name must be a valid variable name.');
+        return;
       }
-      renderGrid();
-    }, ASSIGN_DEBOUNCE_MS);
+      if (assignments.has(name)) {
+        columnErrors.set(x, `Column ${columnLetter(assignments.get(name).x)} is already named ${name}.`);
+        return;
+      }
+      const failed = results[x].findIndex((cell) => cell.error);
+      if (failed !== -1) {
+        columnErrors.set(x, `${cellLabel(x, failed)}: ${results[x][failed].error}`);
+        return;
+      }
+      const values = results[x].map((cell) => cell.value).filter((v) => v !== '');
+      if (values.length > 0) assignments.set(name, { x, expr: `${name}:=[${values.join(',')}]` });
+    });
+
+    for (const name of assignedNames) {
+      if (!assignments.has(name)) {
+        onPurge(name);
+        assignedNames.delete(name);
+      }
+    }
+    await Promise.all(
+      [...assignments].map(async ([name, { x, expr }]) => {
+        const { ok, message } = await onAssign(expr);
+        if (ok) assignedNames.add(name);
+        else columnErrors.set(x, message);
+      }),
+    );
+    if (stale()) return;
+    renderErrors(results);
+  }
+
+  function renderErrors(results) {
+    decorateHeaders();
+    const lines = [...columnErrors].map(([x, message]) => `${columns[x]?.name.trim() || columnLetter(x)}: ${message}`);
+    // Formula errors in columns that aren't named (so aren't reported above) still deserve a
+    // line - the cell itself only has room for "#ERR".
+    results.forEach((cells, x) => {
+      if (columnErrors.has(x)) return;
+      const y = cells.findIndex((cell) => cell.error);
+      if (y !== -1) lines.push(`${cellLabel(x, y)}: ${cells[y].error}`);
+    });
+    status.textContent = lines.join(' · ');
+    status.style.display = lines.length ? '' : 'none';
+  }
+
+  // ---------- grid ----------
+
+  // Focus leaving the panel by keyboard (Esc back to the calculator input, Alt+P, a menu...)
+  // has to release the grid the same way a column name gaining focus does - see releaseGrid.
+  function handleDocumentFocusIn(e) {
+    if (sheet && jss.current === sheet && !root.contains(e.target)) releaseGrid();
+  }
+
+  function mountGrid(lib) {
+    jss = lib;
+    gridWrap.querySelector('.table-panel__loading')?.remove();
+    const data = initialData();
+    [sheet] = jss(gridHost, {
+      // Formulas are Giac's business (lib/tableFormulas.js), not the library's: with this off
+      // it keeps "=A2+B3" as the cell's plain data - while still rewriting the references
+      // when rows/columns are inserted, deleted or moved, and when a formula is drag-filled.
+      parseFormulas: false,
+      about: false,
+      allowExport: false,
+      worksheets: [
+        {
+          data,
+          columns: columns.map((c) => ({ type: 'text', title: c.name, width: COLUMN_WIDTH })),
+          minDimensions: [1, 1],
+          defaultColWidth: COLUMN_WIDTH,
+          defaultColAlign: 'left',
+          allowRenameColumn: false,
+          columnSorting: false,
+          allowComments: false,
+        },
+      ],
+      onafterchanges: sheetChanged,
+      oninsertrow: sheetChanged,
+      ondeleterow: sheetChanged,
+      onmoverow: sheetChanged,
+      oninsertcolumn: sheetChanged,
+      ondeletecolumn: sheetChanged,
+      onmovecolumn: sheetChanged,
+      onundo: sheetChanged,
+      onredo: sheetChanged,
+      onselection: () => {
+        // Gives the panel real DOM focus while a cell is selected, so the app-wide "Esc
+        // returns to the expression input from inside a panel" shortcut (see app.js) sees it.
+        if (!root.contains(document.activeElement)) gridHost.focus({ preventScroll: true });
+      },
+    });
+    document.addEventListener('focusin', handleDocumentFocusIn);
+    readColumns();
+    decorateHeaders();
+    schedulePass(0);
+    focusOnMount();
   }
 
   // Panel mounts fresh each time it's opened (see app.js): an unnamed first column means
   // the sheet is still blank, so start there; otherwise land in the most useful spot to
   // keep typing - the last entry of the last column that's actually wired up to a variable.
   function focusOnMount() {
-    if (columns.length === 0) return;
     if (!columns[0].name.trim()) {
-      focusColName(columns[0].id);
+      nameInputAt(0)?.focus();
       return;
     }
-    for (let i = columns.length - 1; i >= 0; i--) {
-      if (columns[i].name.trim()) {
-        focusCell(columns[i].id, columns[i].cells.length - 1);
+    for (let x = columns.length - 1; x >= 0; x--) {
+      if (columns[x].name.trim()) {
+        selectCell(x, columns[x].cells.length - 1);
         break;
       }
     }
   }
 
-  renderGrid();
-  setTimeout(focusOnMount, 0);
+  loadJspreadsheet().then(
+    (lib) => {
+      if (!destroyed) mountGrid(lib);
+    },
+    (err) => {
+      if (destroyed) return;
+      clear(gridWrap);
+      gridWrap.appendChild(h('span', { class: 'table-panel__loading table-panel__loading--error' }, err.message));
+    },
+  );
 
   function destroy() {
-    clearTimeout(assignTimer);
+    destroyed = true;
+    clearTimeout(passTimer);
+    document.removeEventListener('focusin', handleDocumentFocusIn);
+    if (!sheet) return;
+    if (jss.current === sheet) jss.current = null;
+    // Not its document-level event handlers too (the second argument): those are shared by
+    // every grid the library ever makes, including the one the next mount creates.
+    jss.destroy(gridHost, false);
+    sheet = null;
   }
 
   return { root, destroy };

@@ -59,111 +59,139 @@
   padding: 10px 12px;
 }
 
-.table-panel__grid {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.table-panel__rowHead {
-  width: 28px;
-  min-width: 28px;
-  font-family: var(--mono);
-  font-size: 11px;
+.table-panel__loading {
+  font-size: 13px;
   color: var(--text);
-  opacity: 0.6;
-  text-align: center;
-  padding: 4px;
+  opacity: 0.7;
 }
 
-.table-panel__colHead {
-  padding: 2px 4px 6px;
-  vertical-align: bottom;
+.table-panel__loading--error {
+  color: var(--error);
+  opacity: 1;
 }
 
-.table-panel__colHeadRow {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+/* The grid is Jspreadsheet CE (see lib/jspreadsheet.js). Its colors all come from these custom
+   properties (its own jspreadsheet.themes.css reads them), pointed here at the app's palette
+   so the grid follows the light/dark theme and pau mode like everything else. */
+.table-panel__grid {
+  --border_color: var(--border);
+  --border_color_highlighted: var(--accent);
+  --header_background: var(--code-bg);
+  --header_background_highlighted: var(--accent-bg);
+  --header_color: var(--text);
+  --header_color_highlighted: var(--text-h);
+  --content_background: var(--panel);
+  --content_background_highlighted: var(--code-bg);
+  --content_color: var(--text-h);
+  --content_color_highlighted: var(--text-h);
+  --selection: color-mix(in srgb, var(--accent) 12%, transparent);
+  --cursor: transparent;
+  --menu_background: var(--panel);
+  --menu_background_highlighted: var(--accent-bg);
+  --menu_color: var(--text-h);
+  --menu_color_highlighted: var(--accent);
+  --menu_box_shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  outline: none;
 }
 
-.table-panel__colName {
-  width: 100%;
-  min-width: 80px;
+.table-panel__grid .jss_worksheet {
+  font-family: var(--mono);
+  font-size: 13px;
+  background-color: var(--panel);
+  border-right-color: var(--border);
+  border-bottom-color: var(--border);
+}
+
+.table-panel__grid .jss_worksheet > tbody > tr > td {
+  padding: 5px 8px;
+}
+
+.table-panel__grid .jss_worksheet > tbody > tr > td:first-child,
+.table-panel__grid .jss_worksheet > thead > tr > td:first-child {
+  font-size: 11px;
+}
+
+/* The library only themes its selection outline/fill handle through hardcoded black/white. */
+.table-panel__grid .jss_corner {
+  background-color: var(--accent);
+  border-color: var(--panel);
+}
+
+.table-panel__grid .jss_worksheet .selection-left,
+.table-panel__grid .jss_worksheet .selection-right,
+.table-panel__grid .jss_worksheet .selection-top,
+.table-panel__grid .jss_worksheet .selection-bottom {
+  border-color: var(--accent);
+}
+
+.table-panel__grid .jss_worksheet .copying-left,
+.table-panel__grid .jss_worksheet .copying-right,
+.table-panel__grid .jss_worksheet .copying-top,
+.table-panel__grid .jss_worksheet .copying-bottom {
+  border-color: var(--accent-2);
+}
+
+.table-panel__grid .jss_worksheet .editor > input {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--panel);
+}
+
+.table-panel__grid .jss_contextmenu {
+  border-radius: 6px;
+}
+
+.table-panel__grid .jss_contextmenu > div,
+.table-panel__grid .jss_contextmenu > div a {
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+/* Column header: the column's letter (what cell references use) next to its name input (the
+   CAS variable). */
+.table-panel__grid .jss_worksheet > thead > tr > td {
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.table-panel__colLetter {
+  display: inline-block;
+  width: 18px;
+  font-size: 11px;
+  opacity: 0.7;
+  text-align: left;
+}
+
+.table-panel__grid input.table-panel__colName {
+  width: calc(100% - 20px);
+  min-width: 0;
   font-family: var(--mono);
   font-size: 13px;
   font-weight: 600;
-  padding: 6px 8px;
-  border-radius: 5px;
+  padding: 4px 6px;
+  border-radius: 4px;
   border: 1px solid var(--border);
-  background: var(--code-bg);
+  background: var(--panel);
   color: var(--text-h);
   outline: none;
+  cursor: text;
 }
 
-.table-panel__colName:focus {
+.table-panel__grid input.table-panel__colName:focus {
   border-color: var(--accent-border);
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
-.table-panel__colError {
-  display: block;
-  font-size: 11px;
+.table-panel__grid input.table-panel__colName--error {
+  border-color: var(--error);
+}
+
+.table-panel__grid .jss_worksheet > tbody > tr > td.table-panel__cell--formula {
+  color: var(--accent-2);
+}
+
+.table-panel__grid .jss_worksheet > tbody > tr > td.table-panel__cell--error {
   color: var(--error);
-  padding-top: 3px;
-  max-width: 160px;
-}
-
-.table-panel__removeCol,
-.table-panel__removeRow {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.table-panel__removeCol:hover,
-.table-panel__removeRow:hover {
-  border-color: var(--accent-border);
-  color: var(--accent);
-}
-
-.table-panel__removeCol:disabled,
-.table-panel__removeRow:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.table-panel__addColHead {
-  vertical-align: bottom;
-  padding-bottom: 6px;
-}
-
-.table-panel__cell {
-  width: 100%;
-  min-width: 70px;
-  font-family: var(--mono);
-  font-size: 13px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text-h);
-  outline: none;
-}
-
-.table-panel__cell:focus {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 3px var(--accent-bg);
-}
-
-.table-panel__rowRemoveCell {
-  padding-left: 4px;
 }
 
 .table-panel__footer {
@@ -200,4 +228,10 @@
 
 .table-panel__hint code {
   font-family: var(--mono);
+}
+
+.table-panel__status {
+  flex: 1 0 100%;
+  font-size: 11px;
+  color: var(--error);
 }

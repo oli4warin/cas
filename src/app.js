@@ -714,6 +714,7 @@ export function mountApp(root) {
         null,
         EXAMPLES.map((expr) => h('li', { onclick: () => selectExample(expr) }, expr)),
       ),
+      h('p', { class: 'empty-hint__small empty-hint__privacy' }, 'Everything runs locally in your browser - no data is uploaded.'),
     );
   }
 
@@ -1890,6 +1891,7 @@ export function mountApp(root) {
   function mountTablePanel() {
     tablePanelInstance = TablePanel({
       columns: state.tableColumns,
+      evaluateRaw: giacEvaluateRaw,
       onColumnsChange: (cols) => {
         state.tableColumns = cols;
         schedulePersist();
