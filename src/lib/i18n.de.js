@@ -32,7 +32,8 @@ export const DE = {
   'p on a selected input/output sends it to the plot panel, if plottable':
     'p schickt die ausgewählte Ein-/Ausgabe an den Plot, falls darstellbar',
   's on a selected input/output saves it, if saveable': 's speichert die ausgewählte Ein-/Ausgabe, falls speicherbar',
-  'Alt+P plot · Alt+3 3D plot · Alt+T table · Alt+V variables': 'Alt+P Plot · Alt+3 3D-Plot · Alt+T Tabelle · Alt+V Variablen',
+  'Alt+P plot · Alt+3 3D plot · Alt+T table · Alt+V variables · Alt+H hide/show plot equations':
+    'Alt+P Plot · Alt+3 3D-Plot · Alt+T Tabelle · Alt+V Variablen · Alt+H Plot-Gleichungen aus-/einblenden',
   'Ctrl+S save session to file · Ctrl+O open session file · Ctrl+P print · Alt+C clear session':
     'Ctrl+S Sitzung in Datei speichern · Ctrl+O Sitzungsdatei öffnen · Ctrl+P drucken · Alt+C Sitzung löschen',
   'Hide math keyboard ▲': 'Mathe-Tastatur ausblenden ▲',
@@ -176,10 +177,10 @@ export const DE = {
   'Close plot': 'Plot schliessen',
   '+ Add surface': '+ Fläche hinzufügen',
   '+ Add function': '+ Funktion hinzufügen',
-  'Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.':
-    'Enter springt zum nächsten Feld (am Ende wird eine Zeile angefügt) · Esc zurück zur Eingabe.',
-  'Hide equations': 'Gleichungen ausblenden',
-  'Show equations': 'Gleichungen einblenden',
+  'Enter moves to the next field (adding a row past the bottom) · Esc returns to the input · Alt+H hides/shows the equations.':
+    'Enter springt zum nächsten Feld (am Ende wird eine Zeile angefügt) · Esc zurück zur Eingabe · Alt+H blendet die Gleichungen aus/ein.',
+  'Hide equations (Alt+H)': 'Gleichungen ausblenden (Alt+H)',
+  'Show equations (Alt+H)': 'Gleichungen einblenden (Alt+H)',
   'Reset view box': 'Darstellungsbereich zurücksetzen',
   'Reset view': 'Ansicht zurücksetzen',
   'Loading 3D plotting library…': '3D-Plot-Bibliothek wird geladen…',

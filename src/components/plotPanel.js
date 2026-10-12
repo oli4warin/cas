@@ -17,6 +17,7 @@ import {
 } from '../lib/plotSample.js';
 import { DEFAULT_VIEW, makeRow, defaultDistributionParams } from '../lib/plotRows.js';
 import { collectRowParams, reconcileSliders } from '../lib/plotParams.js';
+import { registerRowsHotkey } from '../lib/plotRowsHotkey.js';
 import { DISTRIBUTION_FAMILIES } from '../lib/distributionParams.js';
 import { FormulaPreview } from './formulaPreview.js';
 import { t } from '../lib/i18n.js';
@@ -836,7 +837,7 @@ export function PlotPanel({
   const rowsHint = h(
     'span',
     { class: 'plot-panel__hint' },
-    t('Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.'),
+    t('Enter moves to the next field (adding a row past the bottom) · Esc returns to the input · Alt+H hides/shows the equations.'),
   );
   rowsContainer.append(addRowBtn, rowsHint);
 
@@ -848,15 +849,18 @@ export function PlotPanel({
   // as reopening the panel always starting with rows shown.
   const rowsToggleBtn = h(
     'button',
-    { type: 'button', class: 'plot-panel__iconBtn', title: t('Hide equations'), onclick: () => setRowsHidden(!rowsHidden) },
+    { type: 'button', class: 'plot-panel__iconBtn', title: t('Hide equations (Alt+H)'), onclick: () => setRowsHidden(!rowsHidden) },
     '▾',
   );
   function setRowsHidden(value) {
     rowsHidden = value;
     rowsContainer.style.display = rowsHidden ? 'none' : '';
     rowsToggleBtn.textContent = rowsHidden ? '▸' : '▾';
-    rowsToggleBtn.title = rowsHidden ? t('Show equations') : t('Hide equations');
+    rowsToggleBtn.title = rowsHidden ? t('Show equations (Alt+H)') : t('Hide equations (Alt+H)');
   }
+
+  // Alt+H hides/shows the rows of all open plot panels together - see plotRowsHotkey.js.
+  const unregisterRowsHotkey = registerRowsHotkey({ isHidden: () => rowsHidden, setHidden: setRowsHidden });
 
   const header = h(
     'div',
@@ -1389,6 +1393,7 @@ export function PlotPanel({
   setTimeout(focusOnMount, 0);
 
   function destroy() {
+    unregisterRowsHotkey();
     resizeObserver?.disconnect();
     clearTimeout(debounceTimer);
     clearTimeout(distFitTimer);

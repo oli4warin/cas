@@ -3,6 +3,7 @@ import { giacToLatex } from '../lib/giacToLatex.js';
 import { loadPlotly } from '../lib/plotly.js';
 import { sampleSurface, sampleParametricSurface, sampleSystem3d } from '../lib/plotSample3d.js';
 import { DEFAULT_VIEW_3D, makeRow3d } from '../lib/plotRows3d.js';
+import { registerRowsHotkey } from '../lib/plotRowsHotkey.js';
 import { FormulaPreview } from './formulaPreview.js';
 import { t } from '../lib/i18n.js';
 
@@ -334,7 +335,7 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   const rowsHint = h(
     'span',
     { class: 'plot-panel__hint' },
-    t('Enter moves to the next field (adding a row past the bottom) · Esc returns to the input.'),
+    t('Enter moves to the next field (adding a row past the bottom) · Esc returns to the input · Alt+H hides/shows the equations.'),
   );
   rowsContainer.append(addRowBtn, rowsHint);
 
@@ -345,15 +346,18 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   // plotInitialized above included) - none of it is lifted to app.js.
   const rowsToggleBtn = h(
     'button',
-    { type: 'button', class: 'plot-panel__iconBtn', title: t('Hide equations'), onclick: () => setRowsHidden(!rowsHidden) },
+    { type: 'button', class: 'plot-panel__iconBtn', title: t('Hide equations (Alt+H)'), onclick: () => setRowsHidden(!rowsHidden) },
     '▾',
   );
   function setRowsHidden(value) {
     rowsHidden = value;
     rowsContainer.style.display = rowsHidden ? 'none' : '';
     rowsToggleBtn.textContent = rowsHidden ? '▸' : '▾';
-    rowsToggleBtn.title = rowsHidden ? t('Show equations') : t('Hide equations');
+    rowsToggleBtn.title = rowsHidden ? t('Show equations (Alt+H)') : t('Hide equations (Alt+H)');
   }
+
+  // Alt+H hides/shows the rows of all open plot panels together - see plotRowsHotkey.js.
+  const unregisterRowsHotkey = registerRowsHotkey({ isHidden: () => rowsHidden, setHidden: setRowsHidden });
 
   const header = h(
     'div',
@@ -656,6 +660,7 @@ export function Plot3DPanel({ evaluateRaw, rows: initialRows, view, onRowsChange
   );
 
   function destroy() {
+    unregisterRowsHotkey();
     destroyed = true;
     resizeObserver?.disconnect();
     clearTimeout(debounceTimer);
