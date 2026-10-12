@@ -65,6 +65,12 @@
   gap: 6px;
 }
 
+.variables-menu__row--selected {
+  border-radius: 4px;
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
 .variables-menu__name {
   font-family: var(--mono);
   font-size: 13px;
