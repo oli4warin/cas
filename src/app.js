@@ -419,7 +419,13 @@ export function mountApp(root) {
     onShowTextChange: handleShowTextChange,
     onDigitsChange: handleDigitsChange,
   });
-  const variablesMenu = VariablesMenu({ onPurge: purgeVariable });
+  // Enter on a row: a variable inserts its bare name, a function its name plus an empty
+  // argument list with the cursor left inside it.
+  const variablesMenu = VariablesMenu({
+    onPurge: purgeVariable,
+    onInsert: (def) => (def.kind === 'function' ? insertAtCursor({ before: def.name + '(', after: ')' }) : insertPlain(def.name)),
+    onCancel: () => input.focus(),
+  });
   const sessionMenu = SessionMenu({
     onSaveToFile: handleSaveSessionToFile,
     onLoadFile: handleLoadSessionFile,
