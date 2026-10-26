@@ -195,6 +195,7 @@ export const XCAS_COMMAND_ALIASES = {
   normalcdf: 'normald_cdf',
   normal_cdf: 'normald_cdf',
   binomcdf: 'binomial_cdf',
+  lg: 'log10',
 };
 
 // Calculator-familiar inverse-notation spellings ("sin-1(x)", "sin^-1(x)", "sin^(-1)(x)") for
