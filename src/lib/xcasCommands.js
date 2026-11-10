@@ -23,6 +23,7 @@ export const XCAS_COMMANDS = {
   mod: 'modulo',
   powmod: 'modular exponentiation',
   sqrt: 'square root',
+  root: 'n-th root: root(n,x), also typed as sqrt[n](x)',
   exp: 'exponential function',
   ln: 'natural logarithm',
   log: 'logarithm',
@@ -220,4 +221,39 @@ const INVERSE_TRIG_ALIAS_RE = new RegExp(`\\b(${INVERSE_TRIG_NAMES_PATTERN})(?:-
 // text first so neither has to special-case the "-1"/"^-1"/"^(-1)" suffix itself.
 export function expandInverseTrigAliases(expr) {
   return expr.replace(INVERSE_TRIG_ALIAS_RE, (_m, base) => INVERSE_TRIG_ALIASES[base.toLowerCase()]);
+}
+
+// Textbook-style n-th root notation, "sqrt[n](x)" (the LaTeX \sqrt[n]{x} spelling), rewritten
+// to Giac's own root(n,x) - index first, radicand second - case-insensitively. Giac itself has
+// no reading for "sqrt[...]" (it would try to index the sqrt function), so this has to happen
+// on the raw text before the engine (see normalizePowerCalls in giac.js) or the live preview's
+// tokenizer (see giacToLatex.js) ever sees it. Only the "sqrt[n](" prefix is rewritten - to
+// "root(n," - so the radicand and its closing ")" are left untouched however deeply nested
+// they are; the index itself may contain nested brackets ("sqrt[l[1]](x)").
+const NTH_ROOT_RE = /\bsqrt\s*\[/gi;
+
+export function expandNthRootSyntax(expr) {
+  if (!/sqrt\s*\[/i.test(expr)) return expr;
+  let out = '';
+  let last = 0;
+  NTH_ROOT_RE.lastIndex = 0;
+  let m;
+  while ((m = NTH_ROOT_RE.exec(expr))) {
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < expr.length; i++) {
+      if (expr[i] === '[') depth++;
+      else if (expr[i] === ']' && --depth === 0) { close = i; break; }
+    }
+    if (close === -1) break;
+    let k = close + 1;
+    while (k < expr.length && /\s/.test(expr[k])) k++;
+    const index = expr.slice(open + 1, close).trim();
+    if (expr[k] !== '(' || !index) continue;
+    out += `${expr.slice(last, m.index)}root(${expandNthRootSyntax(index)},`;
+    last = k + 1;
+    NTH_ROOT_RE.lastIndex = last;
+  }
+  return out + expr.slice(last);
 }

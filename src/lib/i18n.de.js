@@ -341,6 +341,8 @@ export const DE = {
   'modulo': 'Modulo',
   'modular exponentiation': 'modulare Potenz',
   'square root': 'Quadratwurzel',
+  'n-th root: root(n,x), also typed as sqrt[n](x)': 'n-te Wurzel: root(n,x), auch als sqrt[n](x) eingebbar',
+  'root(n, x) or sqrt[n](x) nth root of x': 'root(n, x) oder sqrt[n](x) n-te Wurzel von x',
   'exponential function': 'Exponentialfunktion',
   'natural logarithm': 'natürlicher Logarithmus',
   'logarithm': 'Logarithmus',

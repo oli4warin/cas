@@ -564,7 +564,7 @@ export function mountApp(root) {
     h('span', null, t('s on a selected input/output saves it, if saveable')),
     h('span', null, t('Alt+P plot · Alt+3 3D plot · Alt+T table · Alt+V variables · Alt+H hide/show plot equations')),
     h('span', null, t('Ctrl+S save session to file · Ctrl+O open session file · Ctrl+P print · Alt+C clear session')),
-	h('span', null, t('root(n, x) nth root of x')),
+    h('span', null, t('root(n, x) or sqrt[n](x) nth root of x')),
 
   );
   const hintsToggle = h(
