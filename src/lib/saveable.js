@@ -32,7 +32,10 @@ export function saveableForEntry(entry) {
 
   if (entry.saveExpr) return { quickExpr: entry.saveExpr };
 
-  const raw = entry.raw;
-  if (!raw || hasTopLevelRelation(raw)) return null;
-  return { defaultName: '', value: reinsertableValue(raw) };
+  if (!entry.raw) return null;
+  // Strip Giac's exact-value decimal tail (e.g. "1/3=0.333333") *before* the relation check -
+  // otherwise its "=" makes every exact number with a decimal preview look like an equation.
+  const value = reinsertableValue(entry.raw);
+  if (hasTopLevelRelation(value)) return null;
+  return { defaultName: '', value };
 }
