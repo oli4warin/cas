@@ -5,7 +5,7 @@
 
 import { giacToLatex } from './giacToLatex.js';
 import { getDisplayDigits, setDisplayDigits, parseDecimal, sciLatex, roundForDisplay } from './numberDisplay.js';
-import { XCAS_COMMAND_ALIASES, expandInverseTrigAliases } from './xcasCommands.js';
+import { XCAS_COMMAND_ALIASES, expandInverseTrigAliases, expandNthRootSyntax } from './xcasCommands.js';
 import { fitSinusoid } from './sinRegression.js';
 import { fitPolynomial, fitPower, fitExponential, fitLogarithmic, fitLogistic } from './regression.js';
 import { expandListIndexAliases } from './listIndexAlias.js';
@@ -180,7 +180,11 @@ const UINT_RE = /\d+/y;
 // Exponent -1 is deliberately left alone (the regex only matches a bare digit run right
 // after "^", never a leading "-") since "f^-1(x)" is standard inverse-function notation
 // (e.g. sin^-1(x) = arcsin(x)) - genuine composition, not squaring.
-export function normalizePowerCalls(expr) {
+//
+// Also the one preprocessing step every engine-bound path shares (evaluate, the plot samplers),
+// so it first rewrites "sqrt[n](x)" to root(n,x) - see expandNthRootSyntax in xcasCommands.js.
+export function normalizePowerCalls(rawExpr) {
+  const expr = expandNthRootSyntax(rawExpr);
   let out = '';
   let i = 0;
   const n = expr.length;
@@ -2756,7 +2760,7 @@ export async function evaluate(expr, definitions) {
 
   const sentExpr = normalizeBareInfinity(
     normalizePowerCalls(
-      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeDomainCalls(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions), definitions))))),
+      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeDomainCalls(normalizeSolveqCalls(expandListIndexAliases(expandNthRootSyntax(expr), definitions)), definitions), definitions))))),
     ),
   );
 
@@ -3118,7 +3122,7 @@ export async function evaluateApprox(expr, definitions) {
 
   const normalized = normalizeBareInfinity(
     normalizePowerCalls(
-      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeDomainCalls(normalizeSolveqCalls(expandListIndexAliases(expr, definitions)), definitions), definitions))))),
+      normalizeNspireMatrices(normalizeAliasCommands(normalizeInverseTrigAliases(normalizeNcrAlias(wrapBareEquation(normalizeDomainCalls(normalizeSolveqCalls(expandListIndexAliases(expandNthRootSyntax(expr), definitions)), definitions), definitions))))),
     ),
   );
 
