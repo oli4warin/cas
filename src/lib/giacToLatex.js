@@ -504,6 +504,8 @@ function renderCall(node) {
   const has = (i) => args.length > i;
 
   if (lname === 'sqrt') return `\\sqrt{${a(0)}}`;
+  // Giac's root(n, x) is the n-th root of x - index first, radicand second.
+  if (lname === 'root' && has(1) && !has(2)) return `\\sqrt[${a(0)}]{${a(1)}}`;
   if (lname === 'abs') return `\\left|${a(0)}\\right|`;
   // Complex conjugate - the standard overline notation, matching what Giac's own latex()
   // already renders for conj() whenever it survives evaluation unresolved (e.g. conj(f(z)) for
